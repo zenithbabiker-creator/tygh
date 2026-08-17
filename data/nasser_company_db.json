@@ -1,0 +1,262 @@
+{
+  "users": [
+    {
+      "id": "usr_1",
+      "username": "admin",
+      "password": "admin123",
+      "name": "المدير العام - ناصر",
+      "role": "GENERAL_MANAGER",
+      "gmail": "zenithbabiker@gmail.com",
+      "createdAt": "2026-08-04T06:43:03.503Z"
+    },
+    {
+      "id": "usr_2",
+      "username": "wh_manager",
+      "password": "wh123",
+      "name": "أمين المخزن الرئيسي - أحمد مصطفى",
+      "role": "WAREHOUSE_MANAGER",
+      "gmail": "warehouse.nasser@gmail.com",
+      "createdAt": "2026-08-04T06:43:03.503Z"
+    }
+  ],
+  "products": [
+    {
+      "id": "prd_1",
+      "code": "NASSER-101",
+      "name": "ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3",
+      "category": "أجهزة ومعدات",
+      "stock": 44,
+      "minStock": 5,
+      "unit": "جهاز",
+      "price": 185000,
+      "description": "ماكينة إسبرسو 3 مجموعاتستانلس ستيل مزودة بمضخة ضغط إيطالية high-pressure",
+      "updatedAt": "2026-08-16T15:23:03.714Z"
+    },
+    {
+      "id": "prd_2",
+      "code": "NASSER-102",
+      "name": "طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم",
+      "category": "أجهزة ومعدات",
+      "stock": 21,
+      "minStock": 3,
+      "unit": "قطعة",
+      "price": 75000,
+      "description": "طاحونة شفرات تيتانيوم سريعة بضبط ميكرومتري",
+      "updatedAt": "2026-08-16T15:23:02.452Z"
+    },
+    {
+      "id": "prd_3",
+      "code": "NASSER-103",
+      "name": "طابعة فواتير حرارية عالية السرعة 80mm USB/LAN",
+      "category": "إلكترونيات ومعدات",
+      "stock": 18,
+      "minStock": 4,
+      "unit": "طابعة",
+      "price": 42000,
+      "description": "طابعة فواتير حرارية تدعم قص الورق التلقائي والطباعة السريعة",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    },
+    {
+      "id": "prd_4",
+      "code": "NASSER-104",
+      "name": "ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g",
+      "category": "أجهزة قياس",
+      "stock": 3,
+      "minStock": 5,
+      "unit": "ميزان",
+      "price": 15000,
+      "description": "ميزان إلكتروني ذكي بشاشة LCD مضاءة وشاحن USB",
+      "updatedAt": "2026-08-16T15:23:05.748Z"
+    },
+    {
+      "id": "prd_5",
+      "code": "NASSER-105",
+      "name": "فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي",
+      "category": "مستلزمات ومستهلكات",
+      "stock": 60,
+      "minStock": 10,
+      "unit": "طقم",
+      "price": 28000,
+      "description": "نظام فلترة مياه عالي الجودة لإزالة الشوائب والأملاح",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    },
+    {
+      "id": "prd_6",
+      "code": "NASSER-106",
+      "name": "مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm",
+      "category": "ملحقات ومستلزمات",
+      "stock": 85,
+      "minStock": 15,
+      "unit": "قطعة",
+      "price": 8500,
+      "description": "تامبر احترافي مصمّم لتوزيع الضغط المتساوي على البن",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    }
+  ],
+  "movements": [
+    {
+      "id": "mvt_1786893785748",
+      "productId": "prd_4",
+      "productCode": "NASSER-104",
+      "productName": "ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g",
+      "type": "OUT",
+      "quantity": 1,
+      "previousStock": 4,
+      "newStock": 3,
+      "reason": "أمر تسليم مخزن - المستلم: mhjljk",
+      "referenceNo": "9942",
+      "operatorName": "المدير العام - ناصر",
+      "timestamp": "2026-08-16T15:23:05.748Z"
+    },
+    {
+      "id": "mvt_1786893783714",
+      "productId": "prd_1",
+      "productCode": "NASSER-101",
+      "productName": "ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3",
+      "type": "OUT",
+      "quantity": 1,
+      "previousStock": 45,
+      "newStock": 44,
+      "reason": "أمر تسليم مخزن - المستلم: mhjljk",
+      "referenceNo": "9942",
+      "operatorName": "المدير العام - ناصر",
+      "timestamp": "2026-08-16T15:23:03.714Z"
+    },
+    {
+      "id": "mvt_1786893782452",
+      "productId": "prd_2",
+      "productCode": "NASSER-102",
+      "productName": "طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم",
+      "type": "OUT",
+      "quantity": 1,
+      "previousStock": 22,
+      "newStock": 21,
+      "reason": "أمر تسليم مخزن - المستلم: mhjljk",
+      "referenceNo": "9942",
+      "operatorName": "المدير العام - ناصر",
+      "timestamp": "2026-08-16T15:23:02.452Z"
+    },
+    {
+      "id": "mvt_1786183000000",
+      "productId": "prd_1",
+      "productCode": "NASSER-101",
+      "productName": "ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3",
+      "type": "IN",
+      "quantity": 10,
+      "previousStock": 35,
+      "newStock": 45,
+      "reason": "توريد شحنة استيراد جديدة للمخزن الرئيسية",
+      "referenceNo": "REC-9941",
+      "operatorName": "أمين المخزن الرئيسي - أحمد مصطفى",
+      "timestamp": "2026-08-08T10:00:00.000Z"
+    }
+  ],
+  "logs": [
+    {
+      "id": "log_1786939526376_9owk",
+      "timestamp": "2026-08-17T04:05:26.376Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1786895519382_5txn",
+      "timestamp": "2026-08-16T15:51:59.382Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1786895043110_3yuc",
+      "timestamp": "2026-08-16T15:44:03.110Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1786893785748_07u4",
+      "timestamp": "2026-08-16T15:23:05.748Z",
+      "username": "المدير العام - ناصر",
+      "role": "GENERAL_MANAGER",
+      "action": "حركة مخزنية: إخراج / صرف (-)",
+      "details": "تم تسجيل إخراج / صرف (-) للصنف (ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g) بكمية 1 ميزان. الرصيد السابق: 4 -> الرصيد الجديد: 3. السبب: أمر تسليم مخزن - المستلم: mhjljk",
+      "type": "MOVEMENT"
+    },
+    {
+      "id": "log_1786893783715_emnt",
+      "timestamp": "2026-08-16T15:23:03.715Z",
+      "username": "المدير العام - ناصر",
+      "role": "GENERAL_MANAGER",
+      "action": "حركة مخزنية: إخراج / صرف (-)",
+      "details": "تم تسجيل إخراج / صرف (-) للصنف (ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3) بكمية 1 جهاز. الرصيد السابق: 45 -> الرصيد الجديد: 44. السبب: أمر تسليم مخزن - المستلم: mhjljk",
+      "type": "MOVEMENT"
+    },
+    {
+      "id": "log_1786893782452_xuae",
+      "timestamp": "2026-08-16T15:23:02.452Z",
+      "username": "المدير العام - ناصر",
+      "role": "GENERAL_MANAGER",
+      "action": "حركة مخزنية: إخراج / صرف (-)",
+      "details": "تم تسجيل إخراج / صرف (-) للصنف (طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم) بكمية 1 قطعة. الرصيد السابق: 22 -> الرصيد الجديد: 21. السبب: أمر تسليم مخزن - المستلم: mhjljk",
+      "type": "MOVEMENT"
+    },
+    {
+      "id": "log_1786893748916_6zuj",
+      "timestamp": "2026-08-16T15:22:28.916Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1786883407045_w2ba",
+      "timestamp": "2026-08-16T12:30:07.045Z",
+      "username": "wh_manager",
+      "role": "WAREHOUSE_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم أمين المخزن الرئيسي - أحمد مصطفى",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1786182481107_psm9",
+      "timestamp": "2026-08-08T09:48:01.107Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1786182074340_f2yj",
+      "timestamp": "2026-08-08T09:41:14.340Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1",
+      "timestamp": "2026-08-04T06:43:03.503Z",
+      "username": "النظام",
+      "role": "GENERAL_MANAGER",
+      "action": "تشغيل النظام",
+      "details": "تم بدء تشغيل قاعدة بيانات إدارة المخازن والمخزون لشركة NASSER بنجاح",
+      "type": "INFO"
+    }
+  ],
+  "settings": {
+    "googleSheetUrl": "https://docs.google.com/spreadsheets/d/1NasserCompanyConfig/edit#gid=0",
+    "rateLimitThreshold": 15,
+    "appName": "شركة NASSER - نظام إدارة المخازن والمخزون",
+    "companyAddress": "أمدرمان",
+    "companyPhone": "+249 91 234 5678"
+  }
+}

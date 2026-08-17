@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix شركة NASSER - نظام إدارة المخازن والمبيعات",
+  "description": "نظام إداري متكامل للسيطرة على المخزون والمبيعات، الفواتير وأوامر التسليم، والبحث الذكي مع الدعم الأوفلاين وإعادة تعيين كلمة السر وبوابة تلاوة/OpenRouter",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

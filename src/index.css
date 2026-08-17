@@ -1,0 +1,231 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Cairo', 'Tajawal', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom Slim Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print Styles for Invoices and Delivery Orders */
+@media print {
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Hide non-print controls and navigation */
+  .no-print,
+  button,
+  header,
+  nav,
+  aside,
+  footer {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Reset fixed positioning and overflows on parent modal wrappers so nothing clips */
+  #root, main, .fixed, [class*="backdrop"], .overflow-y-auto, .max-h-\[95vh\] {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    transform: none !important;
+  }
+
+  /* Hide background elements by default */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Force visibility, monochrome color accuracy and crisp styling on printable element and all descendants */
+  .printable,
+  .print-area,
+  .printable *,
+  .print-area * {
+    visibility: visible !important;
+    color: #000000 !important;
+    background-color: #ffffff !important;
+    border-color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Position printable canvas cleanly on paper */
+  .printable,
+  .print-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 24px !important;
+    border: 2px solid #000000 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border-radius: 8px !important;
+    overflow: visible !important;
+    z-index: 999999 !important;
+    display: block !important;
+  }
+
+  /* Preserve flex and grid display properties inside printable area */
+  .printable .flex, .print-area .flex {
+    display: flex !important;
+  }
+
+  .printable .grid, .print-area .grid {
+    display: grid !important;
+  }
+
+  .printable .grid-cols-3, .print-area .grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .printable .items-center, .print-area .items-center {
+    align-items: center !important;
+  }
+
+  .printable .justify-between, .print-area .justify-between {
+    justify-content: space-between !important;
+  }
+
+  .printable .justify-center, .print-area .justify-center {
+    justify-content: center !important;
+  }
+
+  /* Preserve gaps and margins */
+  .printable .gap-1, .print-area .gap-1 { gap: 0.25rem !important; }
+  .printable .gap-2, .print-area .gap-2 { gap: 0.5rem !important; }
+  .printable .gap-3, .print-area .gap-3 { gap: 0.75rem !important; }
+  .printable .gap-4, .print-area .gap-4 { gap: 1rem !important; }
+  .printable .gap-6, .print-area .gap-6 { gap: 1.5rem !important; }
+
+  /* Preserve space-y vertical rhythm */
+  .printable .space-y-1 > :not([hidden]) ~ :not([hidden]), .print-area .space-y-1 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.25rem !important;
+  }
+  .printable .space-y-2 > :not([hidden]) ~ :not([hidden]), .print-area .space-y-2 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.5rem !important;
+  }
+  .printable .space-y-3 > :not([hidden]) ~ :not([hidden]), .print-area .space-y-3 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.75rem !important;
+  }
+  .printable .space-y-6 > :not([hidden]) ~ :not([hidden]), .print-area .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1.5rem !important;
+  }
+
+  /* Preserve table structures and borders */
+  .printable table, .print-area table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .printable th, .printable td,
+  .print-area th, .print-area td {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ensure strictly monochrome pure black text and white backgrounds for all elements when printing */
+  .printable .bg-slate-900, .print-area .bg-slate-900,
+  .printable .bg-blue-900, .print-area .bg-blue-900,
+  .printable .bg-slate-50, .print-area .bg-slate-50,
+  .printable .bg-blue-50, .print-area .bg-blue-50 {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .printable .text-white, .print-area .text-white,
+  .printable .text-slate-900, .print-area .text-slate-900,
+  .printable .text-slate-800, .print-area .text-slate-800,
+  .printable .text-slate-600, .print-area .text-slate-600,
+  .printable .text-slate-500, .print-area .text-slate-500,
+  .printable .text-blue-300, .print-area .text-blue-300,
+  .printable .text-blue-700, .print-area .text-blue-700,
+  .printable .text-blue-900, .print-area .text-blue-900,
+  .printable .text-blue-950, .print-area .text-blue-950 {
+    color: #000000 !important;
+  }
+
+  /* Force clean solid black borders */
+  .printable .border-slate-900, .print-area .border-slate-900,
+  .printable .border-slate-400, .print-area .border-slate-400,
+  .printable .border-slate-300, .print-area .border-slate-300 {
+    border-color: #000000 !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+}
+
+/* Excel Grid System for App Tables */
+table {
+  border-collapse: collapse;
+}
+
+table th,
+table td {
+  border-left: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
+}
+
+table th:first-child,
+table td:first-child {
+  border-right: none;
+}
+
+table th:last-child,
+table td:last-child {
+  border-left: none;
+}
+
+/* Dark Headers Vertical Separators */
+tr.bg-slate-800 th,
+tr.bg-slate-900 th,
+tr.bg-\[\#0F172A\] th,
+thead tr.bg-slate-800 th,
+thead tr.bg-slate-900 th {
+  border-left-color: #334155 !important;
+  border-right-color: #334155 !important;
+}
+

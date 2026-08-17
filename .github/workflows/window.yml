@@ -1,0 +1,147 @@
+name: Build Windows Application (.exe) & Installer
+
+# ==========================================================
+# شركة NASSER - نظام إدارة المخازن والمبيعات
+# GitHub Actions Workflow لبناء مثبت ويندوز كامل (.exe Installer)
+# ==========================================================
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: 🖥️ Build Windows Application & Installer
+    runs-on: windows-latest
+
+    steps:
+      # 1. جلب كود المشروع من GitHub
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. إعداد بيئة Node.js
+      - name: Set up Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 3. إعداد بيئة بايثون
+      - name: Set up Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 4. تثبيت مكتبات Node النظيف (Clean Install) وتجميع التطبيق
+      - name: Clean Install Node Dependencies & Build
+        run: |
+          rm -Force -ErrorAction SilentlyContinue package-lock.json
+          rm -Force -ErrorAction SilentlyContinue -Recurse node_modules
+          npm install --legacy-peer-deps
+          npm run build
+
+      # 5. استخراج سكريبت بايثون الرئيسي تلقائياً من المولد المحدث
+      - name: Extract Python Desktop Script (nasser_company_app.py)
+        run: |
+          npm run generate:desktop
+
+      # 6. تثبيت مكتبات بايثون
+      - name: Install Python Desktop Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6 pyinstaller pillow
+
+      # 7. توليد الأيقونة الخارجية لمكتبات الويندوز مع إجبار ترميز UTF-8
+      - name: Generate High-Res External Icon (assets/icon.ico)
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python scripts/create_icon.py assets/icon.ico
+
+      # 8. بناء حزمة التطبيق الموجهة للمثبت (Onedir) مع عزل مجلد الإخراج
+      - name: Compile Desktop App for Installer
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          pyinstaller --noconsole --onedir --icon=assets/icon.ico --add-data "dist;dist" --hidden-import=PySide6.QtWebEngineWidgets --hidden-import=PySide6.QtWebEngineCore --hidden-import=PySide6.QtPrintSupport --name="NASSER_Company_App" --distpath="py_build_onedir" nasser_company_app.py
+
+      # 8.2 بناء النسخة المحمولة المستقلة (Standalone Portable .exe)
+      - name: Compile Standalone Portable Executable
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          pyinstaller --noconsole --onefile --icon=assets/icon.ico --add-data "dist;dist" --hidden-import=PySide6.QtWebEngineWidgets --hidden-import=PySide6.QtWebEngineCore --hidden-import=PySide6.QtPrintSupport --name="NASSER_Company_App_Portable" --distpath="py_build_portable" nasser_company_app.py
+
+      # 9. إنشاء ملف إعدادات التثبيت (Inno Setup Script) تلقائياً
+      - name: Create Inno Setup Script
+        run: |
+          $innoScript = @"
+          [Setup]
+          AppId={{8B84180A-24E0-4828-A4FB-B780EC82D884}
+          AppName=شركة ناصر - إدارة المخازن والمبيعات
+          AppVersion=1.0.1
+          AppPublisher=محمد بابكر
+          AppPublisherURL=https://nasser-company.com
+          AppSupportURL=https://nasser-company.com
+          AppUpdatesURL=https://nasser-company.com
+          AppCopyright=حقوق النشر © 2026 محمد بابكر - شركة ناصر
+          DefaultDirName={autopf}\NasserCompanyApp
+          DefaultGroupName=شركة ناصر
+          UninstallDisplayIcon={app}\NASSER_Company_App.exe
+          Compression=lzma2
+          SolidCompression=yes
+          OutputDir=installer_output
+          OutputBaseFilename=Nasser_Company_Setup_v1.0.1
+          SetupIconFile=assets\icon.ico
+          ArchitecturesInstallIn64BitMode=x64compatible
+          DisableProgramGroupPage=yes
+          PrivilegesRequired=lowest
+
+          [Tasks]
+          Name: "desktopicon"; Description: "إنشاء اختصار على سطح المكتب (Desktop Shortcut)"; GroupDescription: "اختصارات إضافية:"
+
+          [Files]
+          Source: "py_build_onedir\NASSER_Company_App\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
+
+          [Icons]
+          Name: "{group}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"
+          Name: "{autodesktop}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"
+          Name: "{userdesktop}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+
+          [Run]
+          Filename: "{app}\NASSER_Company_App.exe"; Description: "تشغيل التطبيق الآن"; Flags: nowait postinstall skipifsilent
+          "@
+          Set-Content -Path "setup_script.iss" -Value $innoScript -Encoding UTF8
+
+      # 10. تثبيت وتجميع ملف التثبيت النهائي باستخدام Inno Setup (ISCC)
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build Windows Installer (.exe) with ISCC
+        shell: powershell
+        run: |
+          $isccPath = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-Not (Test-Path $isccPath)) {
+            Write-Error "Inno Setup compiler not found at $isccPath"
+            exit 1
+          }
+          & $isccPath setup_script.iss
+
+      # 11. رفع برنامج التثبيت النهائي (Nasser_Company_Setup_v1.0.1.exe)
+      - name: Upload Windows Installer (.exe Setup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NASSER_Company_Windows_Installer
+          path: installer_output/*.exe
+          if-no-files-found: error
+
+      # 12. رفع النسخة المحمولة المستقلة (Portable Single .exe)
+      - name: Upload Windows Portable (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NASSER_Company_Portable_Executable
+          path: py_build_portable/*.exe
+          if-no-files-found: error
