@@ -306,9 +306,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         });
 
         if (res && res.success === false) {
-          const errMsg = res.message || 'فشلت عملية صرف الفاتورة';
+          const errMsg = res.message || 'فشلت عملية صرف الفاتورة، يرجى مراجعة البيانات';
           setFormError(errMsg);
-          alert(`فشلت العملية: ${errMsg}`);
           return;
         }
       } else {
@@ -325,7 +324,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           if (res && res.success === false) {
             const errMsg = res.message || 'فشلت عملية صرف الصنف بالفاتورة';
             setFormError(errMsg);
-            alert(`فشلت العملية: ${errMsg}`);
             return;
           }
         }

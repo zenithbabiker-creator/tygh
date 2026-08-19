@@ -681,14 +681,26 @@ function findProductInList(products: Product[], idOrCode: string): Product | und
   if (!idOrCode) return undefined;
   const cleanKey = String(idOrCode).trim();
   const lowerKey = cleanKey.toLowerCase();
-  const denseKey = lowerKey.replace(/[\s\-_/.]/g, '');
+  let denseKey = '';
+  try {
+    denseKey = lowerKey.replace(/[\s_./-]/g, '');
+  } catch {
+    denseKey = lowerKey.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
+  }
 
   return products.find(p => {
     if (p.id === cleanKey || p.code === cleanKey) return true;
     if (p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey) return true;
     if (denseKey.length > 0) {
-      const pDenseCode = p.code.toLowerCase().replace(/[\s\-_/.]/g, '');
-      const pDenseId = p.id.toLowerCase().replace(/[\s\-_/.]/g, '');
+      let pDenseCode = '';
+      let pDenseId = '';
+      try {
+        pDenseCode = p.code.toLowerCase().replace(/[\s_./-]/g, '');
+        pDenseId = p.id.toLowerCase().replace(/[\s_./-]/g, '');
+      } catch {
+        pDenseCode = p.code.toLowerCase().replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
+        pDenseId = p.id.toLowerCase().replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
+      }
       if (pDenseCode === denseKey || pDenseId === denseKey) return true;
     }
     return false;

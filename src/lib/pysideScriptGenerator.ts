@@ -423,13 +423,22 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         row = cursor.fetchone()
         if row:
             return row
-        # 3. Dense alphanumeric match (ignoring spaces, hyphens, underscores)
-        dense_target = re.sub(r'[\s\-_/.]', '', p_id_str).lower()
+        # 3. Dense alphanumeric match (ignoring spaces, hyphens, underscores, slashes, dots safely)
+        try:
+            dense_target = re.sub(r'[\\s_./-]', '', p_id_str).lower()
+        except Exception:
+            dense_target = ''.join(c for c in p_id_str if c.isalnum()).lower()
+
         if dense_target:
             cursor.execute("SELECT id, code, name, stock, price FROM products")
             for prod_row in cursor.fetchall():
-                p_code_dense = re.sub(r'[\s\-_/.]', '', str(prod_row[1])).lower()
-                p_id_dense = re.sub(r'[\s\-_/.]', '', str(prod_row[0])).lower()
+                try:
+                    p_code_dense = re.sub(r'[\\s_./-]', '', str(prod_row[1] or '')).lower()
+                    p_id_dense = re.sub(r'[\\s_./-]', '', str(prod_row[0] or '')).lower()
+                except Exception:
+                    p_code_dense = ''.join(c for c in str(prod_row[1] or '') if c.isalnum()).lower()
+                    p_id_dense = ''.join(c for c in str(prod_row[0] or '') if c.isalnum()).lower()
+
                 if p_code_dense == dense_target or p_id_dense == dense_target:
                     return prod_row
         return None
@@ -713,7 +722,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             all_codes = cursor.fetchall()
                             max_num = 100
                             for c in all_codes:
-                                m = re.findall(r'\d+', str(c[0]))
+                                m = re.findall(r'[0-9]+', str(c[0]))
                                 if m:
                                     max_num = max(max_num, int(m[-1]))
                             code = f"NASSER-{max_num + 1}"
@@ -771,7 +780,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         all_codes = cursor.fetchall()
                         max_num = 1000
                         for c in all_codes:
-                            m = re.findall(r'\d+', str(c[0]))
+                            m = re.findall(r'[0-9]+', str(c[0]))
                             if m:
                                 max_num = max(max_num, int(m[-1]))
 

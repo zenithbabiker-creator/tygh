@@ -3,6 +3,14 @@
  * for شركة NASSER Search Engine
  */
 
+/**
+ * Escapes special regex characters in user-provided string to prevent SyntaxError / RangeError
+ */
+export function escapeRegExp(str: string): string {
+  if (!str) return '';
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function toArabicNumerals(val: number | string | undefined | null): string {
   if (val === undefined || val === null) return '';
   let str = String(val);
@@ -11,7 +19,11 @@ export function toArabicNumerals(val: number | string | undefined | null): strin
     '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
     '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
   };
-  return str.replace(/[٠-٩]/g, (d) => map[d] || d);
+  try {
+    return str.replace(/[٠-٩]/g, (d) => map[d] || d);
+  } catch {
+    return str;
+  }
 }
 
 export function formatArabicNumber(val: number | string | undefined | null): string {
@@ -24,34 +36,39 @@ export function formatArabicNumber(val: number | string | undefined | null): str
 export function normalizeArabicText(text: string): string {
   if (!text) return '';
 
-  let normalized = text.toLowerCase();
+  try {
+    let normalized = text.toLowerCase();
 
-  // Normalize Eastern Arabic numerals (٠-٩) to Western digits (0-9) for search matching
-  const easternDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
-  easternDigits.forEach((digit, index) => {
-    normalized = normalized.replace(new RegExp(digit, 'g'), index.toString());
-  });
+    // Normalize Eastern Arabic numerals (٠-٩) to Western digits (0-9) for search matching (safe split-join without RegExp)
+    const easternDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    easternDigits.forEach((digit, index) => {
+      normalized = normalized.split(digit).join(index.toString());
+    });
 
-  // 1. Remove Arabic Tashkeel / Diacritics
-  normalized = normalized.replace(/[\u064B-\u065F\u0670]/g, '');
+    // 1. Remove Arabic Tashkeel / Diacritics
+    normalized = normalized.replace(/[\u064B-\u065F\u0670]/g, '');
 
-  // 2. Normalize Alef variations (أ, إ, آ, ٱ -> ا)
-  normalized = normalized.replace(/[أإآٱ]/g, 'ا');
+    // 2. Normalize Alef variations (أ, إ, آ, ٱ -> ا)
+    normalized = normalized.replace(/[أإآٱ]/g, 'ا');
 
-  // 3. Normalize Teh Marbuta and Heh (ة -> ه)
-  normalized = normalized.replace(/ة/g, 'ه');
+    // 3. Normalize Teh Marbuta and Heh (ة -> ه)
+    normalized = normalized.replace(/ة/g, 'ه');
 
-  // 4. Normalize Yeh and Alef Maksura (ى -> ي)
-  normalized = normalized.replace(/ى/g, 'ي');
+    // 4. Normalize Yeh and Alef Maksura (ى -> ي)
+    normalized = normalized.replace(/ى/g, 'ي');
 
-  // 5. Normalize Hamza forms (ؤ, ئ -> ء)
-  normalized = normalized.replace(/[ؤئ]/g, 'ء');
+    // 5. Normalize Hamza forms (ؤ, ئ -> ء)
+    normalized = normalized.replace(/[ؤئ]/g, 'ء');
 
-  // 6. Clean punctuation and redundant spaces (preserve alphanumeric and arabic characters)
-  normalized = normalized.replace(/[^\w\s\u0600-\u06FF]/g, ' ');
-  normalized = normalized.replace(/\s+/g, ' ').trim();
+    // 6. Clean punctuation and redundant spaces (preserve alphanumeric and arabic characters)
+    normalized = normalized.replace(/[^\w\s\u0600-\u06FF]/g, ' ');
+    normalized = normalized.replace(/\s+/g, ' ').trim();
 
-  return normalized;
+    return normalized;
+  } catch (err) {
+    console.warn('Text normalization fallback:', err);
+    return String(text).toLowerCase().trim();
+  }
 }
 
 /**
@@ -60,7 +77,12 @@ export function normalizeArabicText(text: string): string {
  */
 export function toDenseCode(text: string): string {
   if (!text) return '';
-  return normalizeArabicText(text).replace(/[\s\-_/.]/g, '');
+  try {
+    // Safe character class with hyphen at the end to prevent invalid character range errors
+    return normalizeArabicText(text).replace(/[\s_./-]/g, '');
+  } catch {
+    return normalizeArabicText(text).replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
+  }
 }
 
 /**
