@@ -298,7 +298,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       if (onBatchStockMovement) {
         const res = await onBatchStockMovement({
           items: cartItems.map(item => ({
-            productId: item.product.id,
+            productId: String(item.product.id || item.product.code || ''),
+            productCode: item.product.code || '',
+            productName: item.product.name || '',
             quantity: item.quantity,
           })),
           referenceNo: finalOrderNo,
@@ -314,7 +316,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         // Fallback for sequential stock movement
         for (const item of cartItems) {
           const res = await onStockMovement({
-            productId: item.product.id,
+            productId: String(item.product.id || item.product.code || ''),
+            productCode: item.product.code || '',
+            productName: item.product.name || '',
             type: 'OUT',
             quantity: item.quantity,
             reason: `فاتورة مبيعات - المستلم/العميل: ${recipientName.trim()}`,
@@ -596,11 +600,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setIsModalOpen(true);
   };
 
-  // Save Edit Product
+  // Save Add / Edit Product
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isGeneralManager) {
-      setFormError('عفواً، خيارات تعديل الأصناف هي صلاحيات حصرية للمدير العام فقط.');
+      setFormError('عفواً، خيارات إضافة وتعديل الأصناف هي صلاحيات حصرية للمدير العام فقط.');
       return;
     }
     setFormError('');
@@ -614,20 +618,39 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     try {
       if (editingProduct) {
         const res = await onUpdateProduct(editingProduct.id, {
-          code: code.trim(),
+          code: code.trim() || editingProduct.code,
           name: name.trim(),
           stock: Math.max(0, parseInt(stock, 10) || 0),
           price: Math.max(0, parseFloat(price) || 0),
           minStock: Math.max(1, parseInt(minStock, 10) || 5),
+          category: editingProduct.category || 'عام',
+          unit: editingProduct.unit || 'وحدة',
+          description: editingProduct.description || '',
         });
         if (res.success) {
           setIsModalOpen(false);
         } else {
           setFormError(res.message || 'فشلت عملية تحديث الصنف');
         }
+      } else {
+        const res = await onAddProduct({
+          code: code.trim() || generateNextCode(),
+          name: name.trim(),
+          category: 'عام',
+          stock: Math.max(0, parseInt(stock, 10) || 0),
+          price: Math.max(0, parseFloat(price) || 0),
+          minStock: Math.max(1, parseInt(minStock, 10) || 5),
+          unit: 'وحدة',
+          description: '',
+        });
+        if (res.success) {
+          setIsModalOpen(false);
+        } else {
+          setFormError(res.message || 'فشلت عملية إضافة الصنف');
+        }
       }
     } catch (err: any) {
-      setFormError('حدث خطأ في النظام');
+      setFormError('حدث خطأ في النظام أثناء حفظ الصنف');
     } finally {
       setIsSubmitting(false);
     }
@@ -638,7 +661,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       alert('عفواً، خيارات حذف الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
       return;
     }
-    if (window.confirm(`هل أنت تأكد من إزالة الصنف "${nameStr}" نهائياً من المخزن؟`)) {
+    if (window.confirm(`هل أنت متأكد من حذف الصنف "${nameStr}" نهائياً من قاعدة البيانات؟`)) {
+      setCartItems(prev => prev.filter(item => item.product.id !== id && item.product.code !== id));
       await onDeleteProduct(id);
     }
   };

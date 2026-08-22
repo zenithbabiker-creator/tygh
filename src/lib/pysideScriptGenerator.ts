@@ -516,23 +516,43 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return {}
 
     def _find_product(self, cursor, p_id):
-        """Universal resilient product lookup supporting ID, exact code, case-insensitive, and space/dash-free code"""
+        """Universal resilient product lookup supporting ID, exact code, numeric code (e.g. 1001 or NASSER-1001), trimmed name, and space/dash-free dense code"""
         if not p_id:
             return None
         p_id_str = str(p_id).strip()
+        if p_id_str.lower() in ('', 'none', 'null', 'undefined'):
+            return None
+
         # 1. Exact match on id or code
         cursor.execute("SELECT id, code, name, stock, price FROM products WHERE id=? OR code=?", (p_id_str, p_id_str))
         row = cursor.fetchone()
         if row:
             return row
-        # 2. Case-insensitive trimmed match
+
+        # 2. Case-insensitive trimmed match on code or id
         cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?)) OR LOWER(TRIM(id))=LOWER(TRIM(?))", (p_id_str, p_id_str))
         row = cursor.fetchone()
         if row:
             return row
-        # 3. Dense alphanumeric match (ignoring spaces, hyphens, underscores, slashes, dots safely)
+
+        # 3. Exact or trimmed match on name
+        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(name))=LOWER(TRIM(?))", (p_id_str,))
+        row = cursor.fetchone()
+        if row:
+            return row
+
+        # 4. If p_id_str contains numbers e.g. "1001", check if code is "NASSER-1001" or ends with "-1001" or contains 1001
+        nums = re.findall(r'\d+', p_id_str)
+        if nums:
+            num_str = nums[0]
+            cursor.execute("SELECT id, code, name, stock, price FROM products WHERE code=? OR code LIKE ? OR id=?", (num_str, f"%{num_str}", num_str))
+            num_row = cursor.fetchone()
+            if num_row:
+                return num_row
+
+        # 5. Dense alphanumeric match (ignoring spaces, hyphens, underscores, slashes, dots safely)
         try:
-            dense_target = re.sub(r'[\\s_./-]', '', p_id_str).lower()
+            dense_target = re.sub(r'[\s_./-]', '', p_id_str).lower()
         except Exception:
             dense_target = ''.join(c for c in p_id_str if c.isalnum()).lower()
 
@@ -540,13 +560,15 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             cursor.execute("SELECT id, code, name, stock, price FROM products")
             for prod_row in cursor.fetchall():
                 try:
-                    p_code_dense = re.sub(r'[\\s_./-]', '', str(prod_row[1] or '')).lower()
-                    p_id_dense = re.sub(r'[\\s_./-]', '', str(prod_row[0] or '')).lower()
+                    p_code_dense = re.sub(r'[\s_./-]', '', str(prod_row[1] or '')).lower()
+                    p_id_dense = re.sub(r'[\s_./-]', '', str(prod_row[0] or '')).lower()
+                    p_name_dense = re.sub(r'[\s_./-]', '', str(prod_row[2] or '')).lower()
                 except Exception:
                     p_code_dense = ''.join(c for c in str(prod_row[1] or '') if c.isalnum()).lower()
                     p_id_dense = ''.join(c for c in str(prod_row[0] or '') if c.isalnum()).lower()
+                    p_name_dense = ''.join(c for c in str(prod_row[2] or '') if c.isalnum()).lower()
 
-                if p_code_dense == dense_target or p_id_dense == dense_target:
+                if p_code_dense == dense_target or p_id_dense == dense_target or p_name_dense == dense_target:
                     return prod_row
         return None
 
@@ -945,7 +967,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if parsed_path == '/api/movements':
             try:
                 data = self._read_json_body()
-                p_id = str(data.get('productId', '')).strip()
+                p_id_raw = str(data.get('productId') or data.get('productCode') or data.get('code') or data.get('productName') or data.get('name') or '').strip()
                 m_type = data.get('type', 'OUT')
                 ref_no = data.get('referenceNo', '')
                 reason_str = data.get('reason', '')
@@ -963,16 +985,20 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         cursor = conn.cursor()
 
-                        p_row = self._find_product(cursor, p_id)
+                        p_row = self._find_product(cursor, p_id_raw)
+                        if not p_row and data.get('productCode'):
+                            p_row = self._find_product(cursor, data.get('productCode'))
+                        if not p_row and data.get('productName'):
+                            p_row = self._find_product(cursor, data.get('productName'))
                         
-                        actual_id = p_id
-                        p_code = ""
-                        p_name = "صنف مخزني"
+                        actual_id = p_id_raw
+                        p_code = data.get('productCode') or ""
+                        p_name = data.get('productName') or "صنف مخزني"
                         previous_stock = 0
                         new_stock = 0
 
                         if p_row:
-                            actual_id = p_row[0]
+                            actual_id = str(p_row[0])
                             p_code = p_row[1]
                             p_name = p_row[2]
                             previous_stock = int(p_row[3])
@@ -1039,28 +1065,39 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                         # مرحلة التحقق أولاً: التأكد من توفر الرصيد لجميع الأصناف
                         for idx, itm in enumerate(items):
-                            p_id = str(itm.get('productId', '')).strip()
+                            p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
                             try:
                                 qty = max(1, int(itm.get('quantity', 1)))
                             except Exception:
                                 qty = 1
                             
-                            p_row = self._find_product(cursor, p_id)
+                            p_row = self._find_product(cursor, p_id_key)
+                            if not p_row and itm.get('productCode'):
+                                p_row = self._find_product(cursor, itm.get('productCode'))
+                            if not p_row and itm.get('productName'):
+                                p_row = self._find_product(cursor, itm.get('productName'))
+
                             if not p_row:
-                                return self._send_json({"success": False, "message": f"الصنف ذو المعرف أو الكود ({p_id}) غير موجود بالمخزن"}, 404)
+                                label = itm.get('productName') or itm.get('productCode') or p_id_key or f"بند {idx+1}"
+                                return self._send_json({"success": False, "message": f"الصنف ({label}) غير موجود بالمخزن"}, 404)
                             if int(p_row[3]) < qty:
                                 return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {p_row[3]} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
 
                         # مرحلة التنفيذ الذري: خصم الكميات وتسجيل الحركات دفعة واحدة
                         for idx, itm in enumerate(items):
-                            p_id = str(itm.get('productId', '')).strip()
+                            p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
                             try:
                                 qty = max(1, int(itm.get('quantity', 1)))
                             except Exception:
                                 qty = 1
 
-                            p_row = self._find_product(cursor, p_id)
-                            actual_id, p_code, p_name, prev_stock = p_row[0], p_row[1], p_row[2], int(p_row[3])
+                            p_row = self._find_product(cursor, p_id_key)
+                            if not p_row and itm.get('productCode'):
+                                p_row = self._find_product(cursor, itm.get('productCode'))
+                            if not p_row and itm.get('productName'):
+                                p_row = self._find_product(cursor, itm.get('productName'))
+
+                            actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3])
                             new_stock = max(0, prev_stock - qty)
 
                             cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
@@ -1201,11 +1238,18 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         
                         # Fetch existing stock to check for adjustment
                         row = self._find_product(cursor, p_id)
-                        actual_id = row[0] if row else p_id
+                        if not row and data.get('code'):
+                            row = self._find_product(cursor, data.get('code'))
+                        if not row and data.get('name'):
+                            row = self._find_product(cursor, data.get('name'))
+
+                        actual_id = str(row[0]) if row else str(p_id)
+                        old_code = row[1] if row else (data.get('code') or '')
+                        old_name = row[2] if row else (data.get('name') or '')
                         
                         if row:
-                            old_stock = row[3]
-                            old_price = row[4] if len(row) > 4 else 0.0
+                            old_stock = int(row[3])
+                            old_price = float(row[4]) if len(row) > 4 else 0.0
                             new_stock = int(data.get('stock', old_stock))
                             new_price = float(data.get('price', old_price))
                             if new_stock != old_stock:
@@ -1214,24 +1258,31 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                 cursor.execute('''
                                     INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', (mov_id, 'MANUAL-ADJUST', actual_id, data.get('code', row[1]), data.get('name', row[2]), 'ADJUSTMENT', abs(diff), old_stock, new_stock, f"تعديل يدوي للرصيد ({'+' if diff > 0 else ''}{diff})", data.get('username') or 'المدير العام', now_iso))
+                                ''', (mov_id, 'MANUAL-ADJUST', actual_id, data.get('code', old_code), data.get('name', old_name), 'ADJUSTMENT', abs(diff), old_stock, new_stock, f"تعديل يدوي للرصيد ({'+' if diff > 0 else ''}{diff})", data.get('username') or 'المدير العام', now_iso))
+
+                        p_code = (data.get('code') or old_code).strip()
+                        p_name = (data.get('name') or old_name).strip()
+                        p_cat = data.get('category') or 'عام'
+                        p_stock = max(0, int(data.get('stock', 0)))
+                        p_min = max(1, int(data.get('minStock', 5)))
+                        p_unit = data.get('unit') or 'وحدة'
+                        p_price = max(0.0, float(data.get('price', 0.0)))
+                        p_desc = data.get('description') or ''
 
                         cursor.execute('''
                             UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
                             WHERE id=? OR code=?
-                        ''', (
-                            data.get('code'), data.get('name'), data.get('category', 'عام'),
-                            int(data.get('stock', 0)),
-                            int(data.get('minStock', 5)), data.get('unit', 'وحدة'),
-                            float(data.get('price', 0)),
-                            data.get('description', ''), now_iso, actual_id, actual_id
-                        ))
+                        ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, actual_id))
                         commit_and_sync(conn)
                     finally:
                         conn.close()
 
-                add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'تعديل صنف', f"تم تحديث بيانات الصنف [{data.get('code')}] {data.get('name')}", 'INFO')
-                return self._send_json({"success": True, "message": "تم تحديث الصنف وحفظ التعديلات نهائياً"})
+                add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'تعديل صنف', f"تم تحديث بيانات الصنف [{p_code}] {p_name}", 'INFO')
+                return self._send_json({"success": True, "message": "تم تحديث الصنف وحفظ التعديلات نهائياً", "product": {
+                    "id": actual_id, "code": p_code, "name": p_name, "category": p_cat,
+                    "stock": p_stock, "minStock": p_min, "unit": p_unit, "price": p_price,
+                    "description": p_desc, "updatedAt": now_iso
+                }})
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
@@ -1247,7 +1298,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         cursor = conn.cursor()
                         row = self._find_product(cursor, p_id)
-                        actual_id = row[0] if row else p_id
+                        actual_id = str(row[0]) if row else str(p_id)
                         p_name = row[2] if row else p_id
                         
                         cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, actual_id))

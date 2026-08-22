@@ -784,11 +784,35 @@ app.delete('/api/products/:id', (req, res) => {
   res.json({ success: true, message: 'تم حذف الصنف من قاعدة البيانات بنجاح' });
 });
 
-// Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, or space/dash-free code)
-function findProductInList(products: Product[], idOrCode: string): Product | undefined {
-  if (!idOrCode) return undefined;
-  const cleanKey = String(idOrCode).trim();
+// Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, numeric code, name, or space/dash-free code)
+function findProductInList(products: Product[], idOrCodeOrName: string): Product | undefined {
+  if (!idOrCodeOrName) return undefined;
+  const cleanKey = String(idOrCodeOrName).trim();
+  if (!cleanKey || ['none', 'null', 'undefined'].includes(cleanKey.toLowerCase())) return undefined;
+
   const lowerKey = cleanKey.toLowerCase();
+  
+  // 1. Direct match on id or code
+  const exact = products.find(p => p.id === cleanKey || p.code === cleanKey);
+  if (exact) return exact;
+
+  // 2. Case-insensitive match on id or code
+  const caseMatch = products.find(p => p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey);
+  if (caseMatch) return caseMatch;
+
+  // 3. Match on product name
+  const nameMatch = products.find(p => p.name.trim().toLowerCase() === lowerKey);
+  if (nameMatch) return nameMatch;
+
+  // 4. Numeric match (e.g. 1001 vs NASSER-1001 or 1001)
+  const nums = cleanKey.match(/\d+/);
+  if (nums) {
+    const numStr = nums[0];
+    const numMatch = products.find(p => p.code === numStr || p.code.endsWith(`-${numStr}`) || p.id === numStr);
+    if (numMatch) return numMatch;
+  }
+
+  // 5. Dense alphanumeric match (ignoring spaces, hyphens, underscores, slashes, dots safely)
   let denseKey = '';
   try {
     denseKey = lowerKey.replace(/[\s_./-]/g, '');
@@ -796,38 +820,41 @@ function findProductInList(products: Product[], idOrCode: string): Product | und
     denseKey = lowerKey.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
   }
 
-  return products.find(p => {
-    if (p.id === cleanKey || p.code === cleanKey) return true;
-    if (p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey) return true;
-    if (denseKey.length > 0) {
+  if (denseKey.length > 0) {
+    return products.find(p => {
       let pDenseCode = '';
       let pDenseId = '';
+      let pDenseName = '';
       try {
         pDenseCode = p.code.toLowerCase().replace(/[\s_./-]/g, '');
         pDenseId = p.id.toLowerCase().replace(/[\s_./-]/g, '');
+        pDenseName = p.name.toLowerCase().replace(/[\s_./-]/g, '');
       } catch {
         pDenseCode = p.code.toLowerCase().replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
         pDenseId = p.id.toLowerCase().replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
+        pDenseName = p.name.toLowerCase().replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
       }
-      if (pDenseCode === denseKey || pDenseId === denseKey) return true;
-    }
-    return false;
-  });
+      return pDenseCode === denseKey || pDenseId === denseKey || pDenseName === denseKey;
+    });
+  }
+
+  return undefined;
 }
 
 // STOCK MOVEMENTS - Process In / Out / Adjustment
 app.post('/api/movements', (req, res) => {
-  const { productId, type, quantity, reason, referenceNo, operatorName, role } = req.body;
+  const { productId, productCode, productName, code, name, type, quantity, reason, referenceNo, operatorName, role } = req.body;
 
   const qty = Number(quantity);
-  if (!productId || !type || isNaN(qty) || qty <= 0) {
+  const searchKey = productId || productCode || code || productName || name;
+  if (!searchKey || !type || isNaN(qty) || qty <= 0) {
     return res.status(400).json({ success: false, message: 'بيانات حركة المخزون غير مكتملة أو الكمية غير صالحة' });
   }
 
   const db = readDB();
-  const product = findProductInList(db.products, productId);
+  const product = findProductInList(db.products, searchKey) || (productCode ? findProductInList(db.products, productCode) : undefined) || (productName ? findProductInList(db.products, productName) : undefined);
   if (!product) {
-    return res.status(404).json({ success: false, message: 'الصنف غير موجود بالمخزن' });
+    return res.status(404).json({ success: false, message: `الصنف (${productName || productCode || searchKey}) غير موجود بالمخزن` });
   }
 
   const previousStock = product.stock;
@@ -923,11 +950,12 @@ app.post('/api/movements/batch', (req, res) => {
 
   // 1. Validation phase: check that all items exist and have sufficient stock
   for (const itm of items) {
-    const pId = itm.productId;
+    const key = itm.productId || itm.productCode || itm.code || itm.productName || itm.name;
     const qty = Number(itm.quantity) || 1;
-    const prod = findProductInList(db.products, pId);
+    const prod = findProductInList(db.products, key) || (itm.productCode ? findProductInList(db.products, itm.productCode) : undefined) || (itm.productName ? findProductInList(db.products, itm.productName) : undefined);
     if (!prod) {
-      return res.status(404).json({ success: false, message: `الصنف ذو المعرف أو الكود (${pId}) غير موجود بالمخزن` });
+      const label = itm.productName || itm.productCode || key || 'غير معروف';
+      return res.status(404).json({ success: false, message: `الصنف (${label}) غير موجود بالمخزن` });
     }
     if (prod.stock < qty) {
       return res.status(400).json({
@@ -940,9 +968,9 @@ app.post('/api/movements/batch', (req, res) => {
   // 2. Execution phase: deduct stock and record movements
   const createdMovements: StockMovement[] = [];
   for (const itm of items) {
-    const pId = itm.productId;
+    const key = itm.productId || itm.productCode || itm.code || itm.productName || itm.name;
     const qty = Number(itm.quantity) || 1;
-    const prod = findProductInList(db.products, pId)!;
+    const prod = (findProductInList(db.products, key) || (itm.productCode ? findProductInList(db.products, itm.productCode) : undefined) || (itm.productName ? findProductInList(db.products, itm.productName) : undefined))!;
     const previousStock = prod.stock;
     const newStock = Math.max(0, previousStock - qty);
 
