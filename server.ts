@@ -85,7 +85,143 @@ let rateLimiterState = {
 // Store active OTPs in memory
 const activeOtps: Record<string, { code: string; expiresAt: number; gmail: string }> = {};
 
-// Default Initial Seed Data
+// Default Initial Seed Data Generation
+const NEW_SEED_CATEGORIES = [
+  {
+    category: 'سوق 21 أجهزة بركانية',
+    items: [
+      'شواية لحم',
+      'ثلاجة حلويات',
+      'ماكينة شاورما كهرباء',
+      'مضارب',
+      'آيس ميكر'
+    ]
+  },
+  {
+    category: 'عام',
+    items: [
+      'طاولة السندوتش',
+      'صواني قرص',
+      'ميزان ساعة',
+      'شواية مشكل',
+      'حوضات',
+      'ديسبنسر',
+      'صحن السندوتش',
+      'كرتونة زجاج',
+      'شيخ الشواية',
+      'فرامة أكياس + أخشاب',
+      'شاورما دجاج',
+      'غلاية لتر',
+      'مبرد عصير',
+      'منشر لحوم',
+      'غلاية لتر كهرباء',
+      'شواية عرض السندوتش',
+      'بسكيت سمك',
+      'شواية فراخ',
+      'كرتونة صواني',
+      'غلاية غاز',
+      'قاطع سيخ شتراك صغير',
+      'عصارة برتقال'
+    ]
+  },
+  {
+    category: 'الأجهزة',
+    items: [
+      'طاولة السندوتش',
+      'طباخة 2 شعلة فول',
+      'م. السندوتش مرضى',
+      'ماكينة بطاطس',
+      'مبرد غاز',
+      'فريزر هاير جديد',
+      'ماكينة سمك',
+      'شواية فراخ دوار',
+      'غلاية لتر كهرباء',
+      'ماكينة بروست ضغط',
+      'صندل في مكان نائي يصعب الوصول إليه'
+    ]
+  },
+  {
+    category: 'المخزن الشروق',
+    items: [
+      'شوايه فحم',
+      'شاورما دبل',
+      'غلايه غاز',
+      'سخانات بروست أحمر',
+      'فرن طبقة غاز',
+      'مضرب نابوليتان',
+      'بوفيه',
+      'قلاب لحوم',
+      'مسخنات بروست',
+      'توستر',
+      'كرتونه تقطيع بطاطس',
+      'كرتونه ثلج',
+      'قلايه 2 عين غاز',
+      'وافل مدور + مربع',
+      'ايس ميكر كيلو',
+      'منشار لحمه',
+      'كسارة ثلج',
+      'ماكينه كاشير',
+      'بروست',
+      'فرن طابق',
+      'شوايه لحم',
+      'غلايه كهرباء لتر'
+    ]
+  },
+  {
+    category: 'مخزن العمدة غرب',
+    items: [
+      'حوض عين',
+      'راس شاورما',
+      'ثلاجة حلويات',
+      'شواية فحم',
+      'ثلاجة عرض السندوتش',
+      'مفرمة',
+      'سخان بروست',
+      'كابتشينو',
+      'خلاط لتر',
+      'سخانة منزلية',
+      'مسن بروست',
+      'مفرمة لحم',
+      'خلاط لتر ك',
+      'كسارة ثلج',
+      'كبسة دبل مفرد',
+      'قلاية مفرد غاز',
+      'كبس سمك',
+      'سخان ماء بويلر',
+      'ماكينة تتبيل بروست',
+      'كرتونة صحون',
+      'وافل مربع',
+      'فرن مدور'
+    ]
+  }
+];
+
+function buildInitialProducts(): Product[] {
+  const prods: Product[] = [];
+  let seq = 1;
+  const now = new Date().toISOString();
+  for (const cat of NEW_SEED_CATEGORIES) {
+    for (const name of cat.items) {
+      prods.push({
+        id: String(seq),
+        code: `NASSER-${100 + seq}`,
+        name: name.trim(),
+        category: cat.category,
+        stock: 10,
+        minStock: 5,
+        unit: 'وحدة',
+        price: 0,
+        description: `صنف معتمد: ${name} - ${cat.category}`,
+        updatedAt: now,
+      });
+      seq++;
+    }
+  }
+  return prods;
+}
+
+const DEFAULT_PRODUCTS = buildInitialProducts();
+
 const DEFAULT_DB: DBData = {
   users: [
     {
@@ -107,81 +243,20 @@ const DEFAULT_DB: DBData = {
       createdAt: new Date().toISOString(),
     },
   ],
-  products: [
-    {
-      id: 'prd_1',
-      code: 'NASSER-101',
-      name: 'ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3',
-      category: 'أجهزة ومعدات',
-      stock: 45,
-      minStock: 5,
-      unit: 'وحدة',
-      price: 185000,
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_2',
-      code: 'NASSER-102',
-      name: 'طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم',
-      category: 'أجهزة ومعدات',
-      stock: 22,
-      minStock: 5,
-      unit: 'وحدة',
-      price: 75000,
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_3',
-      code: 'NASSER-103',
-      name: 'طابعة فواتير حرارية عالية السرعة 80mm USB/LAN',
-      category: 'إلكترونيات ومعدات',
-      stock: 18,
-      minStock: 5,
-      unit: 'وحدة',
-      price: 42000,
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_4',
-      code: 'NASSER-104',
-      name: 'ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g',
-      category: 'أجهزة قياس',
-      stock: 4,
-      minStock: 5,
-      unit: 'وحدة',
-      price: 15000,
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_5',
-      code: 'NASSER-105',
-      name: 'فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي',
-      category: 'مستلزمات ومستهلكات',
-      stock: 60,
-      minStock: 5,
-      unit: 'وحدة',
-      price: 28000,
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_6',
-      code: 'NASSER-106',
-      name: 'مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm',
-      category: 'ملحقات ومستلزمات',
-      stock: 85,
-      minStock: 5,
-      unit: 'وحدة',
-      price: 8500,
-      description: '',
-      updatedAt: new Date().toISOString(),
-    }
-  ],
-  movements: [],
+  products: DEFAULT_PRODUCTS,
+  movements: DEFAULT_PRODUCTS.map((p, idx) => ({
+    id: `mvt_init_${idx + 1}`,
+    productId: p.id,
+    productCode: p.code,
+    productName: p.name,
+    type: 'IN',
+    quantity: p.stock,
+    previousStock: 0,
+    newStock: p.stock,
+    reason: 'رصيد افتتاحي رسمي معتمد بالمخزن',
+    operatorName: 'المدير العام',
+    timestamp: p.updatedAt,
+  })),
   logs: [
     {
       id: 'log_1',
@@ -189,7 +264,7 @@ const DEFAULT_DB: DBData = {
       username: 'النظام',
       role: 'GENERAL_MANAGER',
       action: 'تشغيل النظام',
-      details: 'تم بدء تشغيل قاعدة بيانات إدارة المخازن والمخزون لشركة NASSER بنجاح',
+      details: 'تم بدء تشغيل قاعدة بيانات إدارة المخازن والمخزون لشركة NASSER بنجاح وتثبيت الأصناف المعتمدة',
       type: 'INFO',
     },
   ],
@@ -216,6 +291,34 @@ function readDB(): DBData {
     const db: DBData = JSON.parse(content);
 
     if (!db.movements) db.movements = [];
+    if (!db.products) db.products = [];
+
+    // Migration Check: If DB contains old demo items (coffee machines, etc.) or is empty, replace with the 82 new official seed items
+    const hasOldDemoItems = db.products.length < 20 && db.products.some(p =>
+      p.name.includes('ماكينة إعداد القهوة') ||
+      p.name.includes('طاحونة حبوب القهوة') ||
+      p.name.includes('طابعة فواتير حرارية') ||
+      p.name.includes('فلتر تنقية')
+    );
+
+    if (hasOldDemoItems || db.products.length === 0) {
+      console.log('🔄 Migrating Database: Dropping old demo seed data and applying 82 official seed items...');
+      db.products = buildInitialProducts();
+      db.movements = db.products.map((p, idx) => ({
+        id: `mvt_init_${idx + 1}`,
+        productId: p.id,
+        productCode: p.code,
+        productName: p.name,
+        type: 'IN',
+        quantity: p.stock,
+        previousStock: 0,
+        newStock: p.stock,
+        reason: 'رصيد افتتاحي رسمي معتمد بالمخزن',
+        operatorName: 'المدير العام',
+        timestamp: p.updatedAt,
+      }));
+      writeDB(db);
+    }
 
     // Ensure General Manager email is updated to zenithbabiker@gmail.com
     let updated = false;
@@ -459,8 +562,10 @@ app.post('/api/products', (req, res) => {
   const initialStock = Math.max(0, Number(stock) || 0);
   const initialPrice = Math.max(0, Number(price) || 0);
 
+  const nextId = String(db.products.reduce((max, p) => Math.max(max, parseInt(p.id, 10) || 0), 0) + 1);
+
   const newProduct: Product = {
-    id: `prd_${Date.now()}`,
+    id: nextId,
     code: productCode,
     name: name.trim(),
     category: category || 'عام',
@@ -477,7 +582,7 @@ app.post('/api/products', (req, res) => {
   // Record initial stock movement if initialStock > 0
   if (initialStock > 0) {
     const movement: StockMovement = {
-      id: `mvt_${Date.now()}`,
+      id: `mvt_${Date.now()}_${nextId}`,
       productId: newProduct.id,
       productCode: newProduct.code,
       productName: newProduct.name,
@@ -532,16 +637,19 @@ app.post('/api/products/batch', (req, res) => {
   const createdProducts: Product[] = [];
   const now = new Date().toISOString();
 
-  items.forEach((item, index) => {
+  let currentMaxId = db.products.reduce((max, p) => Math.max(max, parseInt(p.id, 10) || 0), 0);
+
+  items.forEach((item) => {
     if (!item.name || !item.name.trim()) return;
 
     maxNum += 1;
+    currentMaxId += 1;
     const finalCode = (item.code && item.code.trim()) ? item.code.trim() : `${maxNum}`;
     const initialStock = Math.max(0, Number(item.stock) || 0);
     const itemPrice = Math.max(0, Number(item.price) || 0);
 
     const newProd: Product = {
-      id: `prd_${Date.now()}_${index}`,
+      id: String(currentMaxId),
       code: finalCode,
       name: item.name.trim(),
       category: item.category || 'عام',
@@ -558,7 +666,7 @@ app.post('/api/products/batch', (req, res) => {
 
     if (initialStock > 0) {
       const movement: StockMovement = {
-        id: `mvt_${Date.now()}_${index}`,
+        id: `mvt_${Date.now()}_${newProd.id}`,
         productId: newProd.id,
         productCode: newProd.code,
         productName: newProd.name,

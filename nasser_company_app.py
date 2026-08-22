@@ -160,14 +160,14 @@ def init_sqlite_db():
         try:
             cursor = conn.cursor()
             
-            # جدول المنتجات
+            # جدول المنتجات بتوليد تلقائي للمعرف (Auto-Increment Primary Key)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS products (
-                    id TEXT PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code TEXT UNIQUE NOT NULL,
                     name TEXT NOT NULL,
                     category TEXT NOT NULL,
-                    stock INTEGER NOT NULL,
+                    stock INTEGER NOT NULL DEFAULT 0,
                     min_stock INTEGER DEFAULT 5,
                     unit TEXT DEFAULT 'وحدة',
                     price REAL DEFAULT 0,
@@ -299,29 +299,136 @@ def init_sqlite_db():
                 ('notes', 'TEXT DEFAULT ""')
             ])
 
-            # تعبئة المنتجات الافتراضية فقط إذا كانت القاعدة جديدة وفارغة تماماً (0 أصناف)
-            cursor.execute("SELECT COUNT(*) FROM products")
-            if cursor.fetchone()[0] == 0:
-                default_products = [
-                    ('prd_1', 'NASSER-101', 'ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3', 'أجهزة ومعدات', 45, 5, 'جهاز', 185000.0, 'ماكينة إسبرسو 3 مجموعاتستانلس ستيل مزودة بمضخة ضغط إيطالية high-pressure', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_2', 'NASSER-102', 'طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم', 'أجهزة ومعدات', 22, 3, 'قطعة', 75000.0, 'طاحونة شفرات تيتانيوم سريعة بضبط ميكرومتري', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_3', 'NASSER-103', 'طابعة فواتير حرارية عالية السرعة 80mm USB/LAN', 'إلكترونيات ومعدات', 18, 4, 'طابعة', 42000.0, 'طابعة فواتير حرارية تدعم قص الورق التلقائي والطباعة السريعة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_4', 'NASSER-104', 'ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g', 'أجهزة قياس', 4, 5, 'ميزان', 15000.0, 'ميزان إلكتروني ذكي بشاشة LCD مضاءة وشاحن USB', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_5', 'NASSER-105', 'فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي', 'مستلزمات ومستهلكات', 60, 10, 'طقم', 28000.0, 'نظام فلترة مياه عالي الجودة لإزالة الشوائب والأملاح', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_6', 'NASSER-106', 'مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm', 'ملحقات ومستلزمات', 85, 15, 'قطعة', 8500.0, 'تامبر احترافي مصمّم لتوزيع الضغط المتساوي على البن', time.strftime('%Y-%m-%dT%H:%M:%SZ'))
-                ]
-                cursor.executemany(
-                    "INSERT INTO products (id, code, name, category, stock, min_stock, unit, price, description, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    default_products
-                )
+            # --- فحص ومسح القائمة الافتراضية القديمة نهائياً وزرع البيانات الرسمية الجديدة (82 صنف) ---
+            cursor.execute("SELECT COUNT(*) FROM products WHERE name LIKE '%ماكينة إعداد القهوة%' OR name LIKE '%طاحونة حبوب القهوة%' OR name LIKE '%طابعة فواتير حرارية%' OR name LIKE '%فلتر تنقية%' OR name LIKE '%مقبض ضغط القهوة%' OR name LIKE '%ميزان إلكتروني ديجيتال%'")
+            has_old_demo = cursor.fetchone()[0] > 0
 
-                # حركات افتتاحية افتراضية
-                for p in default_products:
-                    m_id = f"mvt_init_{p[0]}"
-                    cursor.execute('''
-                        INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (m_id, 'OPENING-INIT', p[0], p[1], p[2], 'IN', p[4], 0, p[4], 'رصيد افتتاحي مسجل بالمستودع', 'المدير العام', p[9]))
+            cursor.execute("SELECT COUNT(*) FROM products")
+            total_prods = cursor.fetchone()[0]
+
+            if has_old_demo or total_prods == 0:
+                print("🔄 SQLite Migration: Dropping old demo products and inserting 82 official seed items...")
+                cursor.execute("DELETE FROM products WHERE name LIKE '%ماكينة إعداد القهوة%' OR name LIKE '%طاحونة حبوب القهوة%' OR name LIKE '%طابعة فواتير حرارية%' OR name LIKE '%فلتر تنقية%' OR name LIKE '%مقبض ضغط القهوة%' OR name LIKE '%ميزان إلكتروني ديجيتال%' OR (code LIKE 'NASSER-10%' AND (id='prd_1' OR id='prd_2' OR id='prd_3' OR id='prd_4' OR id='prd_5' OR id='prd_6'))")
+                
+                cursor.execute("SELECT COUNT(*) FROM products")
+                if cursor.fetchone()[0] == 0:
+                    try:
+                        cursor.execute("DELETE FROM sqlite_sequence WHERE name='products'")
+                    except Exception:
+                        pass
+                    
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    official_seed_groups = [
+                        ("سوق 21 أجهزة بركانية", [
+                            "شواية لحم",
+                            "ثلاجة حلويات",
+                            "ماكينة شاورما كهرباء",
+                            "مضارب",
+                            "آيس ميكر"
+                        ]),
+                        ("عام", [
+                            "طاولة السندوتش",
+                            "صواني قرص",
+                            "ميزان ساعة",
+                            "شواية مشكل",
+                            "حوضات",
+                            "ديسبنسر",
+                            "صحن السندوتش",
+                            "كرتونة زجاج",
+                            "شيخ الشواية",
+                            "فرامة أكياس + أخشاب",
+                            "شاورما دجاج",
+                            "غلاية لتر",
+                            "مبرد عصير",
+                            "منشر لحوم",
+                            "غلاية لتر كهرباء",
+                            "شواية عرض السندوتش",
+                            "بسكيت سمك",
+                            "شواية فراخ",
+                            "كرتونة صواني",
+                            "غلاية غاز",
+                            "قاطع سيخ شتراك صغير",
+                            "عصارة برتقال"
+                        ]),
+                        ("الأجهزة", [
+                            "طاولة السندوتش",
+                            "طباخة 2 شعلة فول",
+                            "م. السندوتش مرضى",
+                            "ماكينة بطاطس",
+                            "مبرد غاز",
+                            "فريزر هاير جديد",
+                            "ماكينة سمك",
+                            "شواية فراخ دوار",
+                            "غلاية لتر كهرباء",
+                            "ماكينة بروست ضغط",
+                            "صندل في مكان نائي يصعب الوصول إليه"
+                        ]),
+                        ("المخزن الشروق", [
+                            "شوايه فحم",
+                            "شاورما دبل",
+                            "غلايه غاز",
+                            "سخانات بروست أحمر",
+                            "فرن طبقة غاز",
+                            "مضرب نابوليتان",
+                            "بوفيه",
+                            "قلاب لحوم",
+                            "مسخنات بروست",
+                            "توستر",
+                            "كرتونه تقطيع بطاطس",
+                            "كرتونه ثلج",
+                            "قلايه 2 عين غاز",
+                            "وافل مدور + مربع",
+                            "ايس ميكر كيلو",
+                            "منشار لحمه",
+                            "كسارة ثلج",
+                            "ماكينه كاشير",
+                            "بروست",
+                            "فرن طابق",
+                            "شوايه لحم",
+                            "غلايه كهرباء لتر"
+                        ]),
+                        ("مخزن العمدة غرب", [
+                            "حوض عين",
+                            "راس شاورما",
+                            "ثلاجة حلويات",
+                            "شواية فحم",
+                            "ثلاجة عرض السندوتش",
+                            "مفرمة",
+                            "سخان بروست",
+                            "كابتشينو",
+                            "خلاط لتر",
+                            "سخانة منزلية",
+                            "مسن بروست",
+                            "مفرمة لحم",
+                            "خلاط لتر ك",
+                            "كسارة ثلج",
+                            "كبسة دبل مفرد",
+                            "قلاية مفرد غاز",
+                            "كبس سمك",
+                            "سخان ماء بويلر",
+                            "ماكينة تتبيل بروست",
+                            "كرتونة صحون",
+                            "وافل مربع",
+                            "فرن مدور"
+                        ])
+                    ]
+
+                    seq_counter = 1
+                    for grp_cat, grp_items in official_seed_groups:
+                        for grp_name in grp_items:
+                            p_code = f"NASSER-{100 + seq_counter}"
+                            cursor.execute('''
+                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
+                            
+                            row_id = cursor.lastrowid
+                            m_id = f"mvt_init_{row_id}"
+                            cursor.execute('''
+                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (m_id, 'OPENING-INIT', str(row_id), p_code, grp_name.strip(), 'IN', 10, 0, 10, 'رصيد افتتاحي رسمي مسجل بالمستودع', 'المدير العام', now_iso))
+                            seq_counter += 1
 
             # تعبئة حسابات المستخدمين إذا كانت فارغة
             cursor.execute("SELECT COUNT(*) FROM users")
@@ -462,7 +569,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         conn.close()
 
                 products = [{
-                    "id": r[0], "code": r[1], "name": r[2], "category": r[3],
+                    "id": str(r[0]), "code": r[1], "name": r[2], "category": r[3],
                     "stock": r[4], "minStock": r[5], "unit": r[6], "price": r[7] if r[7] is not None else 0,
                     "description": r[8] or "", "updatedAt": r[9] or ""
                 } for r in rows]
@@ -700,7 +807,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 price_val = max(0.0, float(data.get('price') or 0.0))
                 min_stock = max(1, int(data.get('minStock') or 5))
                 now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                p_id = f"prd_{int(time.time()*1000)}"
                 
                 with DB_LOCK:
                     conn = get_db_connection()
@@ -724,25 +830,28 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         if cursor.fetchone()[0] > 0:
                             code = f"{code}-{int(time.time()) % 1000}"
 
+                        # Insert using SQLite native AUTOINCREMENT for primary key
                         cursor.execute('''
-                            INSERT INTO products (id, code, name, category, stock, min_stock, unit, price, description, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (p_id, code, name, category, stock_val, min_stock, unit, price_val, desc, now_iso))
+                            INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (code, name, category, stock_val, min_stock, unit, price_val, desc, now_iso))
+                        
+                        new_id = str(cursor.lastrowid)
 
                         # Opening stock movement if stock > 0
                         if stock_val > 0:
-                            mov_id = f"mvt_{int(time.time()*1000)}"
+                            mov_id = f"mvt_{int(time.time()*1000)}_{new_id}"
                             cursor.execute('''
                                 INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (mov_id, 'OPENING-BAL', p_id, code, name, 'IN', stock_val, 0, stock_val, 'رصيد افتتاحي عند إنشاء الصنف', data.get('username') or 'المدير العام', now_iso))
+                            ''', (mov_id, 'OPENING-BAL', new_id, code, name, 'IN', stock_val, 0, stock_val, 'رصيد افتتاحي عند إنشاء الصنف', data.get('username') or 'المدير العام', now_iso))
 
                         commit_and_sync(conn)
                     finally:
                         conn.close()
 
                 new_product = {
-                    "id": p_id, "code": code, "name": name, "category": category,
+                    "id": new_id, "code": code, "name": name, "category": category,
                     "stock": stock_val, "minStock": min_stock, "unit": unit, "price": price_val,
                     "description": desc, "updatedAt": now_iso
                 }
@@ -788,7 +897,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             if cursor.fetchone()[0] > 0:
                                 p_code = f"{p_code}_{int(time.time()) % 1000}_{idx}"
 
-                            p_id = f"prd_{int(time.time()*1000)}_{idx}"
                             p_cat = itm.get('category') or 'عام'
                             p_unit = itm.get('unit') or 'وحدة'
                             p_desc = itm.get('description') or ''
@@ -797,12 +905,14 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             p_min = max(1, int(itm.get('minStock') or 5))
 
                             cursor.execute('''
-                                INSERT INTO products (id, code, name, category, stock, min_stock, unit, price, description, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (p_id, p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso))
+                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso))
+                            
+                            p_id = str(cursor.lastrowid)
 
                             if p_stock > 0:
-                                mov_id = f"mvt_{int(time.time()*1000)}_{idx}"
+                                mov_id = f"mvt_{int(time.time()*1000)}_{p_id}"
                                 cursor.execute('''
                                     INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

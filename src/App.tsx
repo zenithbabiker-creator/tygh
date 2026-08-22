@@ -4,6 +4,7 @@ import { InventoryView } from './components/InventoryView';
 import { UsersView } from './components/UsersView';
 import { LogsView } from './components/LogsView';
 import { ForgotPasswordModal } from './components/ForgotPasswordModal';
+import { INITIAL_PRODUCTS } from './lib/seedData';
 import {
   Boxes,
   Users,
@@ -65,19 +66,17 @@ export default function App() {
   };
 
   // Application State
-  const DEFAULT_PRODUCTS: Product[] = [
-    { id: '1', code: 'NASSER-101', name: 'ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3', category: 'أجهزة ومعدات', stock: 45, minStock: 5, unit: 'جهاز', price: 185000, updatedAt: new Date().toISOString() },
-    { id: '2', code: 'NASSER-102', name: 'طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم', category: 'أجهزة ومعدات', stock: 22, minStock: 3, unit: 'قطعة', price: 75000, updatedAt: new Date().toISOString() },
-    { id: '3', code: 'NASSER-103', name: 'طابعة فواتير حرارية عالية السرعة 80mm USB/LAN', category: 'إلكترونيات ومعدات', stock: 18, minStock: 4, unit: 'طابعة', price: 42000, updatedAt: new Date().toISOString() },
-    { id: '4', code: 'NASSER-104', name: 'ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g', category: 'أجهزة قياس', stock: 4, minStock: 5, unit: 'ميزان', price: 15000, updatedAt: new Date().toISOString() },
-    { id: '5', code: 'NASSER-105', name: 'فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي', category: 'مستلزمات ومستهلكات', stock: 60, minStock: 10, unit: 'طقم', price: 28000, updatedAt: new Date().toISOString() },
-    { id: '6', code: 'NASSER-106', name: 'مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm', category: 'ملحقات ومستلزمات', stock: 85, minStock: 15, unit: 'قطعة', price: 8500, updatedAt: new Date().toISOString() }
-  ];
+  const DEFAULT_PRODUCTS: Product[] = INITIAL_PRODUCTS;
 
   const [products, setProducts] = useState<Product[]>(() => {
     try {
-      const saved = localStorage.getItem('nasser_warehouse_products_v3');
-      if (saved) return JSON.parse(saved);
+      const saved = localStorage.getItem('nasser_warehouse_products_v4');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length >= 20 && !parsed.some((p: Product) => p.name?.includes('ماكينة إعداد القهوة'))) {
+          return parsed;
+        }
+      }
     } catch {
       // Fallback
     }
@@ -86,7 +85,7 @@ export default function App() {
 
   const [movements, setMovements] = useState<StockMovement[]>(() => {
     try {
-      const saved = localStorage.getItem('nasser_warehouse_movements_v1');
+      const saved = localStorage.getItem('nasser_warehouse_movements_v2');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -106,16 +105,16 @@ export default function App() {
       if (res.isJson && res.data && res.data.success && Array.isArray(res.data.products)) {
         setProducts(res.data.products);
         try {
-          localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(res.data.products));
+          localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(res.data.products));
         } catch (e) {
           console.warn('Failed saving to localStorage', e);
         }
       } else {
-        const saved = localStorage.getItem('nasser_warehouse_products_v3');
+        const saved = localStorage.getItem('nasser_warehouse_products_v4');
         if (saved) setProducts(JSON.parse(saved));
       }
     } catch (e) {
-      const saved = localStorage.getItem('nasser_warehouse_products_v3');
+      const saved = localStorage.getItem('nasser_warehouse_products_v4');
       if (saved) setProducts(JSON.parse(saved));
     }
   };
@@ -126,16 +125,16 @@ export default function App() {
       if (res.isJson && res.data && res.data.success && Array.isArray(res.data.movements)) {
         setMovements(res.data.movements);
         try {
-          localStorage.setItem('nasser_warehouse_movements_v1', JSON.stringify(res.data.movements));
+          localStorage.setItem('nasser_warehouse_movements_v2', JSON.stringify(res.data.movements));
         } catch (e) {
           console.warn('Failed saving to localStorage', e);
         }
       } else {
-        const saved = localStorage.getItem('nasser_warehouse_movements_v1');
+        const saved = localStorage.getItem('nasser_warehouse_movements_v2');
         if (saved) setMovements(JSON.parse(saved));
       }
     } catch (e) {
-      const saved = localStorage.getItem('nasser_warehouse_movements_v1');
+      const saved = localStorage.getItem('nasser_warehouse_movements_v2');
       if (saved) setMovements(JSON.parse(saved));
     }
   };
