@@ -753,7 +753,7 @@ export default function App() {
           {/* Footer Info */}
           <div className="pt-4 border-t border-slate-800 text-center text-[10px] text-slate-400 flex items-center justify-between">
             <span>شركة NASSER - نظام إدارة المخازن 100% Offline</span>
-            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v2.0.0</span>
+            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v2.1.0</span>
           </div>
 
         </div>
@@ -787,7 +787,7 @@ export default function App() {
                   شركة <span className="text-blue-400">NASSER</span>
                 </h1>
                 <span className="text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 px-1.5 py-0.2 rounded-md">
-                  v2.0
+                  v2.1.0
                 </span>
               </div>
               <p className="text-[10px] text-blue-400 mt-0.5 font-bold tracking-widest uppercase">

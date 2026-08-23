@@ -21,7 +21,8 @@ import {
   Check,
   Building,
   User as UserIcon,
-  DollarSign
+  DollarSign,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface InventoryViewProps {
@@ -61,6 +62,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 }) => {
   const isGeneralManager = currentUser?.role === 'GENERAL_MANAGER';
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
 
   // Product Add / Edit Modal & Dedicated Standalone Batch Screen
   const [isBatchAddMode, setIsBatchAddMode] = useState(false);
@@ -364,7 +366,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return `NASSER-${maxNum + 1}`;
   };
 
-  // Open Add Product Modal (Single or Batch Mode)
+  // Open Single Add Product Modal
   const openAddModal = () => {
     if (!isGeneralManager) {
       alert('عفواً، خيارات إضافة وتعديل الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
@@ -377,8 +379,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setPrice('0');
     setMinStock('5');
     setFormError('');
+    setIsModalOpen(true);
+  };
 
-    // Pre-populate 5 clean rows in grid table with standardized NASSER- prefix
+  // Open Batch Add Products (Excel / Grid Mode)
+  const openBatchAddModal = () => {
+    if (!isGeneralManager) {
+      alert('عفواً، خيارات إضافة وتعديل الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
+      return;
+    }
     let startingNum = 100;
     products.forEach(p => {
       const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
@@ -976,22 +985,87 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
 
             {isGeneralManager && (
-              <button
-                onClick={openAddModal}
-                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-blue-200 flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                <span>إضافة صنف جديد</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={openAddModal}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-blue-200 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>إضافة صنف جديد</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openBatchAddModal}
+                  className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  title="إدخال جماعي من ملفات إكسل"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>إضافة دفعة (إكسل)</span>
+                </button>
+              </div>
             )}
           </div>
 
-          {/* Product List Table with Direct Click-to-Add Behavior */}
+          {/* Selected Product Quick Info Bar (Single Selection Indicator) */}
+          {selectedProductId && (() => {
+            const selProd = products.find(p => p.id === selectedProductId);
+            if (!selProd) return null;
+            const inCart = cartItems.some(item => item.product.id === selProd.id);
+            return (
+              <div className="bg-blue-50/90 border border-blue-200 p-3 rounded-xl flex items-center justify-between gap-3 text-xs animate-fadeIn">
+                <div className="flex items-center gap-2 text-blue-950 font-bold">
+                  <span className="bg-blue-600 text-white px-2 py-0.5 rounded font-mono font-black text-[11px]">
+                    {selProd.code}
+                  </span>
+                  <span className="font-extrabold text-sm">{selProd.name}</span>
+                  <span className="text-slate-500 font-normal">| الرصيد: {toArabicNumerals(selProd.stock)} {selProd.unit || 'وحدة'}</span>
+                  <span className="text-emerald-700 font-black font-mono">| {toArabicNumerals(Number(selProd.price || 0).toLocaleString())} د.ل</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleProductCart(selProd)}
+                    className={`px-3 py-1.5 rounded-lg font-extrabold text-xs flex items-center gap-1 transition cursor-pointer ${
+                      inCart
+                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <span>{inCart ? 'موجود بالسلة' : 'إضافة للفاتورة'}</span>
+                  </button>
+                  {isGeneralManager && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(selProd)}
+                        className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-blue-600" />
+                        <span>تعديل</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteProductConfirm(selProd.id, selProd.name)}
+                        className="px-3 py-1.5 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 rounded-lg font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>حذف</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Product List Table with Strict Single Row Selection */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-3 bg-slate-900 text-white flex items-center justify-between">
               <span className="text-xs font-bold flex items-center gap-2">
                 <Boxes className="w-4 h-4 text-blue-400" />
-                <span>قائمة أصناف المخزن والأسعار (الضغط على أي صنف يُضيفه مباشرة للفاتورة)</span>
+                <span>قائمة أصناف المخزن والأسعار (انقر لتحديد الصنف، أو اضغط زر السلة لإضافته للفاتورة)</span>
               </span>
               <span className="text-[11px] font-mono text-slate-300">
                 {toArabicNumerals(filteredProducts.length)} صنف
@@ -1006,32 +1080,37 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3.5">اسم الصنف (Item Name)</th>
                     <th className="p-3.5 w-28 text-center bg-blue-50/70">عدد الصنف (الكمية)</th>
                     <th className="p-3.5 w-28 text-center bg-emerald-50/70">سعر الصنف (الوحدة)</th>
+                    <th className="p-3.5 w-24 text-center">إضافة للسلة</th>
                     {isGeneralManager && (
-                      <th className="p-3.5 w-28 text-center">إجراءات (تعديل / حذف)</th>
+                      <th className="p-3.5 w-24 text-center">إجراءات</th>
                     )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredProducts.length === 0 ? (
                     <tr>
-                      <td colSpan={isGeneralManager ? 5 : 4} className="p-12 text-center text-slate-400">
+                      <td colSpan={isGeneralManager ? 6 : 5} className="p-12 text-center text-slate-400">
                         <Boxes className="w-12 h-12 mx-auto mb-3 opacity-30 text-blue-600" />
                         <p className="font-bold text-sm text-slate-700">لا توجد أصناف مخزنية تطابق البحث</p>
                       </td>
                     </tr>
                   ) : (
                     filteredProducts.map((product) => {
+                      const isSelected = selectedProductId === product.id;
                       const inCart = cartItems.find(item => item.product.id === product.id);
                       const isOutOfStock = product.stock <= 0;
 
                       return (
                         <tr
                           key={product.id}
-                          onClick={() => handleToggleProductCart(product)}
+                          onClick={() => setSelectedProductId(product.id)}
+                          onDoubleClick={() => handleToggleProductCart(product)}
                           className={`transition-all cursor-pointer select-none ${
-                            inCart
-                              ? 'bg-emerald-50/90 border-r-4 border-r-emerald-600 font-bold'
-                              : 'hover:bg-blue-50/60'
+                            isSelected
+                              ? 'bg-blue-100/90 ring-2 ring-inset ring-blue-500 font-bold'
+                              : inCart
+                              ? 'bg-emerald-50/70 border-r-4 border-r-emerald-500'
+                              : 'hover:bg-slate-50'
                           }`}
                         >
                           {/* Code / Serial */}
@@ -1043,7 +1122,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <td className="p-3.5">
                             <div className="flex items-center gap-2">
                               {inCart && (
-                                <span className="bg-emerald-600 text-white p-0.5 rounded-full shrink-0">
+                                <span className="bg-emerald-600 text-white p-0.5 rounded-full shrink-0" title="موجود في الفاتورة">
                                   <Check className="w-3 h-3" />
                                 </span>
                               )}
@@ -1063,6 +1142,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           {/* Item Price */}
                           <td className="p-3.5 text-center font-black font-mono text-sm sm:text-base bg-emerald-50/30 text-emerald-800">
                             {toArabicNumerals(Number(product.price || 0).toLocaleString())}
+                          </td>
+
+                          {/* Add to Cart Button */}
+                          <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleProductCart(product)}
+                              className={`p-1.5 rounded-lg transition cursor-pointer text-xs font-bold flex items-center justify-center mx-auto gap-1 ${
+                                inCart
+                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                  : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+                              }`}
+                              title={inCart ? 'إزالة من السلة' : 'إضافة إلى سلة الفاتورة'}
+                            >
+                              <ShoppingCart className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">{inCart ? 'بالسلة' : '+ سلة'}</span>
+                            </button>
                           </td>
 
                           {/* Actions: Edit & Delete (General Manager only) */}
@@ -1330,15 +1426,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
       </div>
 
-      {/* SINGLE ITEM EDIT PRODUCT MODAL */}
-      {isModalOpen && editingProduct && (
+      {/* SINGLE ITEM ADD / EDIT PRODUCT MODAL */}
+      {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
             
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <Edit2 className="w-5 h-5 text-blue-600" />
-                <span>تعديل بيانات الصنف المخزني</span>
+                {editingProduct ? (
+                  <>
+                    <Edit2 className="w-5 h-5 text-blue-600" />
+                    <span>تعديل بيانات الصنف المخزني</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-5 h-5 text-emerald-600" />
+                    <span>إضافة صنف مخزني جديد</span>
+                  </>
+                )}
               </h3>
               <button
                 type="button"
@@ -1361,7 +1466,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-bold text-slate-700">الكود / Serial Number</label>
                   <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                    تلقائي ومحمي - غير قابل للتعديل
+                    تلقائي ومحمي - يبدأ بـ NASSER-
                   </span>
                 </div>
                 <input
@@ -1374,10 +1479,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">اسم الصنف بالكامل</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">اسم الصنف بالكامل *</label>
                 <input
                   type="text"
                   required
+                  placeholder="مثال: كابل شبكة كات 6 مصفح..."
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-bold focus:border-blue-600 focus:outline-none"
@@ -1386,7 +1492,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد المتاح بالمخزن</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد الافتتاحي بالمخزن *</label>
                   <input
                     type="number"
                     min="0"
@@ -1405,7 +1511,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر الصنف (الوحدة)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر الصنف (الوحدة) *</label>
                   <input
                     type="number"
                     min="0"
@@ -1436,10 +1542,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                  className={`px-6 py-2.5 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer ${
+                    editingProduct ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                  }`}
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>تحديث بيانات الصنف</span>
+                  <span>{editingProduct ? 'تحديث بيانات الصنف' : 'حفظ وإضافة الصنف'}</span>
                 </button>
               </div>
             </form>

@@ -861,22 +861,29 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         cursor = conn.cursor()
                         
-                        # Auto code generation if empty
+                        # Auto code generation with strict NASSER- formatting
                         code = (data.get('code') or '').strip()
+                        cursor.execute("SELECT id, code FROM products")
+                        all_prods = cursor.fetchall()
+                        max_num = 100
+                        for c in all_prods:
+                            m = re.findall(r'[0-9]+', str(c[1]))
+                            if m:
+                                max_num = max(max_num, int(m[-1]))
+                            try:
+                                max_num = max(max_num, int(c[0]))
+                            except Exception:
+                                pass
+
                         if not code:
-                            cursor.execute("SELECT code FROM products")
-                            all_codes = cursor.fetchall()
-                            max_num = 100
-                            for c in all_codes:
-                                m = re.findall(r'[0-9]+', str(c[0]))
-                                if m:
-                                    max_num = max(max_num, int(m[-1]))
                             code = f"NASSER-{max_num + 1}"
+                        elif not code.upper().startswith('NASSER-'):
+                            code = f"NASSER-{code}"
                         
                         # Handle unique constraint collision
                         cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (code,))
                         if cursor.fetchone()[0] > 0:
-                            code = f"{code}-{int(time.time()) % 1000}"
+                            code = f"NASSER-{max_num + 1}_{int(time.time()) % 100}"
 
                         # Insert using SQLite native AUTOINCREMENT for primary key
                         cursor.execute('''
@@ -1302,8 +1309,15 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                         cursor.execute('''
                             UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
-                            WHERE id=? OR code=? OR code=?
-                        ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, old_code, p_id))
+                            WHERE id=? OR code=?
+                        ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, actual_id))
+                        
+                        if cursor.rowcount == 0:
+                            cursor.execute('''
+                                UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
+                                WHERE id=? OR code=? OR name=?
+                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, p_id, p_id, p_name))
+
                         commit_and_sync(conn)
                     finally:
                         conn.close()
@@ -1333,7 +1347,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         p_code = str(row[1]) if row else str(p_id)
                         p_name = row[2] if row else p_id
                         
-                        cursor.execute("DELETE FROM products WHERE id=? OR code=? OR code=?", (actual_id, p_code, p_id))
+                        cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, p_code))
+                        if cursor.rowcount == 0:
+                            cursor.execute("DELETE FROM products WHERE id=? OR code=? OR name=?", (p_id, p_id, p_name))
                         cursor.execute("DELETE FROM movements WHERE product_id=? OR product_code=?", (actual_id, p_code))
                         commit_and_sync(conn)
                     finally:
