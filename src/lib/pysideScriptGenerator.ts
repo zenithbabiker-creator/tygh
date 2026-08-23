@@ -451,6 +451,24 @@ def init_sqlite_db():
                     ('usr_2', 'wh_manager', 'wh123', 'أمين المخزن الرئيسي - أحمد مصطفى', 'WAREHOUSE_MANAGER', 'warehouse.nasser@gmail.com', now_iso)
                 )
 
+            # 6. Database Migration Routine: Ensure all products and movements strictly follow 'NASSER-' prefix
+            try:
+                cursor.execute("SELECT id, code FROM products")
+                all_prods = cursor.fetchall()
+                migrated_cnt = 0
+                for r in all_prods:
+                    r_id, r_code = str(r[0]), str(r[1] or '')
+                    if not r_code.startswith('NASSER-'):
+                        clean_num = re.sub(r'\\D', '', r_code) or r_id
+                        new_code = f"NASSER-{clean_num}"
+                        cursor.execute("UPDATE products SET code=? WHERE id=?", (new_code, r_id))
+                        cursor.execute("UPDATE movements SET product_code=? WHERE product_id=? OR product_code=?", (new_code, r_id, r_code))
+                        migrated_cnt += 1
+                if migrated_cnt > 0:
+                    print(f"SQLite Migration: Standardized {migrated_cnt} products to NASSER- prefix.")
+            except Exception as mig_err:
+                print("SQLite code migration note:", mig_err)
+
             commit_and_sync(conn)
         finally:
             conn.close()
@@ -909,7 +927,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         # Baseline numeric code
                         cursor.execute("SELECT code FROM products")
                         all_codes = cursor.fetchall()
-                        max_num = 1000
+                        max_num = 100
                         for c in all_codes:
                             m = re.findall(r'[0-9]+', str(c[0]))
                             if m:
@@ -920,7 +938,13 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             if not p_name:
                                 continue
                             max_num += 1
-                            p_code = (itm.get('code') or '').strip() or f"{max_num}"
+                            raw_code = (itm.get('code') or '').strip()
+                            if not raw_code:
+                                p_code = f"NASSER-{max_num}"
+                            elif not raw_code.upper().startswith('NASSER-'):
+                                p_code = f"NASSER-{raw_code}"
+                            else:
+                                p_code = raw_code
                             
                             # Ensure code uniqueness
                             cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (p_code,))
@@ -1236,7 +1260,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         cursor = conn.cursor()
                         
-                        # Fetch existing stock to check for adjustment
+                        # Resilient product lookup
                         row = self._find_product(cursor, p_id)
                         if not row and data.get('code'):
                             row = self._find_product(cursor, data.get('code'))
@@ -1260,7 +1284,14 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 ''', (mov_id, 'MANUAL-ADJUST', actual_id, data.get('code', old_code), data.get('name', old_name), 'ADJUSTMENT', abs(diff), old_stock, new_stock, f"تعديل يدوي للرصيد ({'+' if diff > 0 else ''}{diff})", data.get('username') or 'المدير العام', now_iso))
 
-                        p_code = (data.get('code') or old_code).strip()
+                        raw_code = (data.get('code') or old_code).strip()
+                        if not raw_code:
+                            p_code = f"NASSER-{actual_id}"
+                        elif not raw_code.upper().startswith('NASSER-'):
+                            p_code = f"NASSER-{raw_code}"
+                        else:
+                            p_code = raw_code
+
                         p_name = (data.get('name') or old_name).strip()
                         p_cat = data.get('category') or 'عام'
                         p_stock = max(0, int(data.get('stock', 0)))
@@ -1271,8 +1302,8 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                         cursor.execute('''
                             UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
-                            WHERE id=? OR code=?
-                        ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, actual_id))
+                            WHERE id=? OR code=? OR code=?
+                        ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, old_code, p_id))
                         commit_and_sync(conn)
                     finally:
                         conn.close()
@@ -1299,9 +1330,11 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         cursor = conn.cursor()
                         row = self._find_product(cursor, p_id)
                         actual_id = str(row[0]) if row else str(p_id)
+                        p_code = str(row[1]) if row else str(p_id)
                         p_name = row[2] if row else p_id
                         
-                        cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, actual_id))
+                        cursor.execute("DELETE FROM products WHERE id=? OR code=? OR code=?", (actual_id, p_code, p_id))
+                        cursor.execute("DELETE FROM movements WHERE product_id=? OR product_code=?", (actual_id, p_code))
                         commit_and_sync(conn)
                     finally:
                         conn.close()

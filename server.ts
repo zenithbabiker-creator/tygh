@@ -320,6 +320,28 @@ function readDB(): DBData {
       writeDB(db);
     }
 
+    // Startup Data Migration Check: Ensure all products and movements strictly follow 'NASSER-' prefix
+    let migratedPrefixCount = 0;
+    db.products.forEach(p => {
+      if (!p.code || !p.code.startsWith('NASSER-')) {
+        const oldCode = p.code || '';
+        const cleanedNum = oldCode.replace(/\D/g, '') || p.id;
+        p.code = `NASSER-${cleanedNum}`;
+        migratedPrefixCount++;
+        // Update movements referencing the old code
+        db.movements.forEach(m => {
+          if (m.productId === p.id || m.productCode === oldCode) {
+            m.productCode = p.code;
+          }
+        });
+      }
+    });
+
+    if (migratedPrefixCount > 0) {
+      console.log(`🔄 Standardized ${migratedPrefixCount} product codes to strict 'NASSER-' prefix format.`);
+      writeDB(db);
+    }
+
     // Ensure General Manager email is updated to zenithbabiker@gmail.com
     let updated = false;
     db.users = db.users.map(u => {
@@ -546,17 +568,17 @@ app.post('/api/products', (req, res) => {
   
   let productCode = (code || '').trim();
   if (!productCode) {
-    let maxNum = 0;
-    let prefix = 'NASSER-';
+    let maxNum = 100;
     db.products.forEach(p => {
-      const match = p.code.match(/^(.*?)(\d+)$/);
+      const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
-        if (match[1]) prefix = match[1];
-        const num = parseInt(match[2], 10);
+        const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > maxNum) maxNum = num;
       }
     });
-    productCode = `${prefix}${maxNum > 0 ? maxNum + 1 : db.products.length + 101}`;
+    productCode = `NASSER-${maxNum + 1}`;
+  } else if (!productCode.startsWith('NASSER-')) {
+    productCode = `NASSER-${productCode}`;
   }
 
   const initialStock = Math.max(0, Number(stock) || 0);
@@ -625,11 +647,11 @@ app.post('/api/products/batch', (req, res) => {
   const db = readDB();
 
   // Find baseline numeric serial code
-  let maxNum = 1000;
+  let maxNum = 100;
   db.products.forEach(p => {
-    const match = p.code.match(/\d+/);
+    const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
     if (match) {
-      const num = parseInt(match[0], 10);
+      const num = parseInt(match[1] || match[0], 10);
       if (!isNaN(num) && num > maxNum) maxNum = num;
     }
   });
@@ -644,7 +666,10 @@ app.post('/api/products/batch', (req, res) => {
 
     maxNum += 1;
     currentMaxId += 1;
-    const finalCode = (item.code && item.code.trim()) ? item.code.trim() : `${maxNum}`;
+    let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NASSER-${maxNum}`;
+    if (!finalCode.startsWith('NASSER-')) {
+      finalCode = `NASSER-${finalCode}`;
+    }
     const initialStock = Math.max(0, Number(item.stock) || 0);
     const itemPrice = Math.max(0, Number(item.price) || 0);
 
@@ -705,7 +730,14 @@ app.put('/api/products/:id', (req, res) => {
   }
 
   const db = readDB();
-  const index = db.products.findIndex(p => p.id === id);
+  
+  // Use resilient finder to locate matching product by ID or Code
+  const targetProduct = findProductInList(db.products, id) || (code ? findProductInList(db.products, code) : undefined);
+  if (!targetProduct) {
+    return res.status(404).json({ success: false, message: `الصنف غير موجود بالمخزن (${id})` });
+  }
+
+  const index = db.products.findIndex(p => p.id === targetProduct.id);
   if (index === -1) {
     return res.status(404).json({ success: false, message: 'الصنف غير موجود' });
   }
@@ -716,13 +748,18 @@ app.put('/api/products/:id', (req, res) => {
   const rawPrice = Number(price);
   const newPrice = !isNaN(rawPrice) ? Math.max(0, rawPrice) : (oldProd.price || 0);
 
+  let newCode = (code || oldProd.code).trim();
+  if (!newCode.startsWith('NASSER-')) {
+    newCode = `NASSER-${newCode}`;
+  }
+
   // If stock was modified directly, record movement log
   if (!isNaN(newStock) && newStock !== oldProd.stock) {
     const diff = newStock - oldProd.stock;
     const movement: StockMovement = {
       id: `mvt_${Date.now()}`,
       productId: oldProd.id,
-      productCode: code || oldProd.code,
+      productCode: newCode,
       productName: name || oldProd.name,
       type: 'ADJUSTMENT',
       quantity: Math.abs(diff),
@@ -737,7 +774,7 @@ app.put('/api/products/:id', (req, res) => {
 
   db.products[index] = {
     ...oldProd,
-    code: (code || oldProd.code).trim(),
+    code: newCode,
     name: (name || oldProd.name).trim(),
     category: category || oldProd.category || 'عام',
     stock: newStock,
@@ -771,15 +808,20 @@ app.delete('/api/products/:id', (req, res) => {
   }
 
   const db = readDB();
-  const product = db.products.find(p => p.id === id);
-  if (!product) {
-    return res.status(404).json({ success: false, message: 'الصنف غير موجود' });
+  const targetProduct = findProductInList(db.products, id);
+  if (!targetProduct) {
+    return res.status(404).json({ success: false, message: `الصنف المراد حذفه غير موجود بالمخزن (${id})` });
   }
 
-  db.products = db.products.filter(p => p.id !== id);
+  const actualId = targetProduct.id;
+  const targetCode = targetProduct.code;
+  const targetName = targetProduct.name;
+
+  db.products = db.products.filter(p => p.id !== actualId && p.code !== targetCode);
+  db.movements = db.movements.filter(m => m.productId !== actualId && m.productCode !== targetCode);
   writeDB(db);
 
-  addAuditLog(String(username || 'المدير العام'), String(role || 'GENERAL_MANAGER'), 'حذف صنف من المخزن', `تم حذف الصنف (${product.name}) بكود [${product.code}] نهائياً`, 'WARNING');
+  addAuditLog(String(username || 'المدير العام'), String(role || 'GENERAL_MANAGER'), 'حذف صنف من المخزن', `تم حذف الصنف (${targetName}) بكود [${targetCode}] نهائياً من قاعدة البيانات`, 'WARNING');
 
   res.json({ success: true, message: 'تم حذف الصنف من قاعدة البيانات بنجاح' });
 });

@@ -103,19 +103,38 @@ export default function App() {
     try {
       const res = await safeJsonFetch('/api/products');
       if (res.isJson && res.data && res.data.success && Array.isArray(res.data.products)) {
-        setProducts(res.data.products);
+        // Standardize any legacy codes to NASSER-
+        const normalized = res.data.products.map((p: Product) => ({
+          ...p,
+          code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || p.id}`,
+        }));
+        setProducts(normalized);
         try {
-          localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(res.data.products));
+          localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(normalized));
         } catch (e) {
           console.warn('Failed saving to localStorage', e);
         }
       } else {
         const saved = localStorage.getItem('nasser_warehouse_products_v4');
-        if (saved) setProducts(JSON.parse(saved));
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const normalized = parsed.map((p: Product) => ({
+            ...p,
+            code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || p.id}`,
+          }));
+          setProducts(normalized);
+        }
       }
     } catch (e) {
       const saved = localStorage.getItem('nasser_warehouse_products_v4');
-      if (saved) setProducts(JSON.parse(saved));
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const normalized = parsed.map((p: Product) => ({
+          ...p,
+          code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || p.id}`,
+        }));
+        setProducts(normalized);
+      }
     }
   };
 
@@ -457,11 +476,11 @@ export default function App() {
     }
 
     // Local fallback
-    let maxNum = 1000;
+    let maxNum = 100;
     products.forEach(p => {
-      const match = p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
-        const num = parseInt(match[0], 10);
+        const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > maxNum) maxNum = num;
       }
     });
@@ -472,7 +491,10 @@ export default function App() {
     items.forEach((item, index) => {
       if (!item.name || !item.name.trim()) return;
       maxNum += 1;
-      const finalCode = (item.code && item.code.trim()) ? item.code.trim() : `${maxNum}`;
+      let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NASSER-${maxNum}`;
+      if (!finalCode.startsWith('NASSER-')) {
+        finalCode = `NASSER-${finalCode}`;
+      }
       const stockVal = Math.max(0, Number(item.stock) || 0);
 
       newProds.push({
@@ -491,7 +513,7 @@ export default function App() {
 
     setProducts(prev => {
       const updated = [...newProds, ...prev];
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
       return updated;
     });
 
@@ -526,8 +548,8 @@ export default function App() {
     }
 
     setProducts(prev => {
-      const updated = prev.map(p => (p.id === id ? { ...p, ...productData } : p));
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      const updated = prev.map(p => (p.id === id || p.code === id) ? { ...p, ...productData } : p);
+      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
       return updated;
     });
 
@@ -555,8 +577,8 @@ export default function App() {
     }
 
     setProducts(prev => {
-      const updated = prev.filter(p => p.id !== id);
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      const updated = prev.filter(p => p.id !== id && p.code !== id);
+      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
       return updated;
     });
 
@@ -616,10 +638,11 @@ export default function App() {
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-blue-500 mx-auto flex items-center justify-center shadow-lg shadow-blue-900/50">
               <Warehouse className="w-9 h-9 text-white" />
             </div>
-            <h1 className="text-2xl font-black tracking-wide text-white font-['Tajawal']">
-              شركة <span className="text-blue-400">NASSER</span>
+            <h1 className="text-2xl font-black tracking-wide text-white font-['Tajawal'] flex items-center justify-center gap-2">
+              <span>شركة <span className="text-blue-400">NASSER</span></span>
+              <span className="text-[11px] font-mono bg-blue-600/30 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">v2.0.0</span>
             </h1>
-            <p className="text-xs text-slate-300 font-bold">نظام إدارة المخازن والمخزون والتوريد والتصريف</p>
+            <p className="text-xs text-slate-300 font-bold">نظام إدارة المخازن والمخزون والتوريد والتصريف - الإصدار الثاني (v2.0.0)</p>
           </div>
 
           {/* Error Banner */}
@@ -728,8 +751,9 @@ export default function App() {
           </form>
 
           {/* Footer Info */}
-          <div className="pt-4 border-t border-slate-800 text-center text-[10px] text-slate-500">
-            شركة NASSER - نظام إدارة المخازن والمخزون مع دعم الجرد المباشر والتنبيه بالنواقص 100% Offline Mode.
+          <div className="pt-4 border-t border-slate-800 text-center text-[10px] text-slate-400 flex items-center justify-between">
+            <span>شركة NASSER - نظام إدارة المخازن 100% Offline</span>
+            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v2.0.0</span>
           </div>
 
         </div>
@@ -758,9 +782,14 @@ export default function App() {
               <Warehouse className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white tracking-tight font-['Tajawal',sans-serif]">
-                شركة <span className="text-blue-400">NASSER</span>
-              </h1>
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-xl font-bold text-white tracking-tight font-['Tajawal',sans-serif]">
+                  شركة <span className="text-blue-400">NASSER</span>
+                </h1>
+                <span className="text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 px-1.5 py-0.2 rounded-md">
+                  v2.0
+                </span>
+              </div>
               <p className="text-[10px] text-blue-400 mt-0.5 font-bold tracking-widest uppercase">
                 نظام إدارة المخازن والمخزون
               </p>

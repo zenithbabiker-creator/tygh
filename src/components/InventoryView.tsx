@@ -349,19 +349,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
-  // Automated Next Sequential Code Generator (1001, 1002, 1003...)
+  // Automated Next Sequential Code Generator (NASSER-101, NASSER-102... or NASSER-1001...)
   const generateNextCode = (currentList: Product[] = products): string => {
-    let maxNum = 1000;
+    let maxNum = 100;
     currentList.forEach(p => {
-      const match = p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
-        const num = parseInt(match[0], 10);
+        const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > maxNum) {
           maxNum = num;
         }
       }
     });
-    return `${maxNum + 1}`;
+    return `NASSER-${maxNum + 1}`;
   };
 
   // Open Add Product Modal (Single or Batch Mode)
@@ -378,19 +378,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setMinStock('5');
     setFormError('');
 
-    // Pre-populate 5 clean rows in grid table
-    let startingNum = 1000;
+    // Pre-populate 5 clean rows in grid table with standardized NASSER- prefix
+    let startingNum = 100;
     products.forEach(p => {
-      const match = p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
-        const num = parseInt(match[0], 10);
+        const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > startingNum) startingNum = num;
       }
     });
 
     const initialFive = Array.from({ length: 5 }, (_, i) => ({
       id: `row_${Date.now()}_${i}`,
-      code: `${startingNum + 1 + i}`,
+      code: `NASSER-${startingNum + 1 + i}`,
       name: '',
       stock: '1',
       price: '0',
@@ -411,18 +411,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     if (lines.length === 0) return;
 
-    let baseNum = 1000;
+    let baseNum = 100;
     products.forEach(p => {
-      const match = p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
-        const num = parseInt(match[0], 10);
+        const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > baseNum) baseNum = num;
       }
     });
     gridRows.forEach(r => {
-      const match = r.code.match(/\d+/);
+      const match = r.code.match(/^(?:NASSER-)?(\d+)$/i) || r.code.match(/\d+/);
       if (match) {
-        const num = parseInt(match[0], 10);
+        const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > baseNum) baseNum = num;
       }
     });
@@ -442,7 +442,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       if (cleanParts.length === 0) return;
 
       baseNum += 1;
-      let parsedCode = `${baseNum}`;
+      let parsedCode = `NASSER-${baseNum}`;
       let parsedName = '';
       let parsedStock = '1';
       let parsedPrice = '0';
@@ -455,7 +455,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           parsedName = cleanParts[0];
           parsedStock = String(Math.max(0, parseInt(cleanParts[1], 10) || 1));
         } else {
-          parsedCode = cleanParts[0];
+          parsedCode = cleanParts[0].startsWith('NASSER-') ? cleanParts[0] : `NASSER-${cleanParts[0]}`;
           parsedName = cleanParts[1];
         }
       } else if (cleanParts.length === 3) {
@@ -465,13 +465,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           parsedStock = String(Math.max(0, parseInt(cleanParts[1], 10) || 1));
           parsedPrice = String(Math.max(0, parseFloat(cleanParts[2]) || 0));
         } else {
-          parsedCode = cleanParts[0];
+          parsedCode = cleanParts[0].startsWith('NASSER-') ? cleanParts[0] : `NASSER-${cleanParts[0]}`;
           parsedName = cleanParts[1];
           parsedStock = String(Math.max(0, parseInt(cleanParts[2], 10) || 1));
         }
       } else if (cleanParts.length >= 4) {
         // [Code, Name, Quantity, Price]
-        parsedCode = cleanParts[0];
+        parsedCode = cleanParts[0].startsWith('NASSER-') ? cleanParts[0] : `NASSER-${cleanParts[0]}`;
         parsedName = cleanParts[1];
         parsedStock = String(Math.max(0, parseInt(cleanParts[2], 10) || 1));
         parsedPrice = String(Math.max(0, parseFloat(cleanParts[3]) || 0));
@@ -501,18 +501,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   // Add 5 more empty rows to the grid
   const handleAddFiveRows = () => {
     setGridRows(prev => {
-      let maxNum = 1000;
+      let maxNum = 100;
       products.forEach(p => {
-        const match = p.code.match(/\d+/);
+        const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
         if (match) {
-          const num = parseInt(match[0], 10);
+          const num = parseInt(match[1] || match[0], 10);
           if (!isNaN(num) && num > maxNum) maxNum = num;
         }
       });
       prev.forEach(r => {
-        const match = r.code.match(/\d+/);
+        const match = r.code.match(/^(?:NASSER-)?(\d+)$/i) || r.code.match(/\d+/);
         if (match) {
-          const num = parseInt(match[0], 10);
+          const num = parseInt(match[1] || match[0], 10);
           if (!isNaN(num) && num > maxNum) maxNum = num;
         }
       });
@@ -521,7 +521,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       for (let i = 1; i <= 5; i++) {
         newFive.push({
           id: `row_${Date.now()}_${Math.random().toString(36).substring(2, 5)}_${i}`,
-          code: `${maxNum + i}`,
+          code: `NASSER-${maxNum + i}`,
           name: '',
           stock: '1',
           price: '0',
@@ -552,15 +552,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     setIsSubmitting(true);
     try {
-      const itemsToSave = validRows.map(r => ({
-        code: r.code.trim() || generateNextCode(products),
-        name: r.name.trim(),
-        stock: parseInt(r.stock, 10) || 0,
-        price: parseFloat(r.price) || 0,
-        category: 'عام',
-        minStock: 5,
-        unit: 'وحدة',
-      }));
+      const itemsToSave = validRows.map(r => {
+        let finalCode = r.code.trim();
+        if (!finalCode) {
+          finalCode = generateNextCode(products);
+        } else if (!finalCode.startsWith('NASSER-')) {
+          finalCode = `NASSER-${finalCode}`;
+        }
+        return {
+          code: finalCode,
+          name: r.name.trim(),
+          stock: parseInt(r.stock, 10) || 0,
+          price: parseFloat(r.price) || 0,
+          category: 'عام',
+          minStock: 5,
+          unit: 'وحدة',
+        };
+      });
 
       if (onBatchAddProducts) {
         const res = await onBatchAddProducts(itemsToSave);
@@ -616,9 +624,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     setIsSubmitting(true);
     try {
+      let formattedCode = code.trim();
+      if (!formattedCode) {
+        formattedCode = generateNextCode();
+      } else if (!formattedCode.startsWith('NASSER-')) {
+        formattedCode = `NASSER-${formattedCode}`;
+      }
+
       if (editingProduct) {
         const res = await onUpdateProduct(editingProduct.id, {
-          code: code.trim() || editingProduct.code,
+          code: formattedCode || editingProduct.code,
           name: name.trim(),
           stock: Math.max(0, parseInt(stock, 10) || 0),
           price: Math.max(0, parseFloat(price) || 0),
@@ -634,7 +649,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }
       } else {
         const res = await onAddProduct({
-          code: code.trim() || generateNextCode(),
+          code: formattedCode,
           name: name.trim(),
           category: 'عام',
           stock: Math.max(0, parseInt(stock, 10) || 0),
