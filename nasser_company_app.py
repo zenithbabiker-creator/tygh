@@ -2,10 +2,11 @@
 ====================================================================
 شركة NASSER - نظام إدارة المخازن والمبيعات وإصدار الفواتير
 تطبيق سطح المكتب الاحترافي لشركة ناصر (PySide6 Native Desktop App)
+- حل جذري لمشكلة ERR_EMPTY_RESPONSE و 127.0.0.1 عبر معالجة sys.stderr وخادم ThreadingHTTPServer متزامن
 - حل مشكلة المسارات والشاشة البيضاء عبر sys._MEIPASS و get_resource_path
-- قاعدة بيانات SQLite ديناميكية دائمة تحفظ البيانات أوفلاين مدى الحياة مع دعم الأسعار
+- قاعدة بيانات SQLite ديناميكية دائمة تحفظ البيانات أوفلاين مدى الحياة في AppData
 - معالجة تامة لأخطاء Database Lock عبر Thread Locks & SQLite WAL & busy_timeout
-- دعم مسار /api/movements/batch لتسجيل الفواتير في عملية ذرية واحدة وحساب الإجماليات
+- دعم مسار /api/movements/batch و /api/sales لتسجيل الفواتير في عملية ذرية واحدة
 - طباعة داخلية أصلية 100% عبر PySide6.QtPrintSupport (QPrinter, QPrintDialog)
 - التقاط فوري لاختصار لوحة المفاتيح (Ctrl + P) لطباعة الفاتورة مباشرة
 ====================================================================
@@ -21,6 +22,29 @@ import threading
 import socket
 import http.server
 import socketserver
+import urllib.parse
+import mimetypes
+
+# حماية تامة ضد أخطاء NoneType في وضع --noconsole في بيئة ويندوز (حل مشكلة ERR_EMPTY_RESPONSE)
+class SafeNullWriter:
+    def write(self, *args, **kwargs): pass
+    def flush(self, *args, **kwargs): pass
+
+if sys.stdout is None:
+    sys.stdout = SafeNullWriter()
+if sys.stderr is None:
+    sys.stderr = SafeNullWriter()
+
+# تسجيل أنواع MIME الصريحة لملفات الويب لضمان عدم تعذر تحميل الأصول
+mimetypes.init()
+mimetypes.add_type('application/javascript', '.js')
+mimetypes.add_type('application/javascript', '.mjs')
+mimetypes.add_type('text/css', '.css')
+mimetypes.add_type('application/json', '.json')
+mimetypes.add_type('image/svg+xml', '.svg')
+mimetypes.add_type('image/x-icon', '.ico')
+mimetypes.add_type('font/woff2', '.woff2')
+mimetypes.add_type('font/woff', '.woff')
 
 # قفل خيوط عام لضمان التزامن وحماية قاعدة البيانات من أي تضارب (Database Lock Fix)
 DB_LOCK = threading.RLock()
@@ -71,9 +95,9 @@ def get_html_file_path():
 def get_app_dir():
     """
     الحصول على المجلد الدائم المستقر لقاعدة البيانات على القرص الصلب.
-    الأولوية لمجلد Roaming AppData ومجلد المستخدم الدائم لضمان عدم مسح البيانات أبداً بواسطة أدوات تنظيف القرص أو الملفات المؤقتة.
+    الأولوية لمجلد Roaming AppData ومجلد المستخدم الدائم لضمان عدم مسح البيانات أبداً.
     """
-    # 1. Roaming AppData (أعلى مستوى أمان وثبات في ويندوز، لا يمسحه تنظيف القرص Disk Cleanup إطلاقاً)
+    # 1. Roaming AppData (أعلى مستوى أمان وثبات في ويندوز، لا يمسحه تنظيف القرص إطلاقاً)
     roaming = os.environ.get('APPDATA')
     if roaming and os.path.isdir(roaming):
         app_dir = os.path.join(roaming, 'NasserCompanyApp')
@@ -96,7 +120,7 @@ def get_app_dir():
 def get_db_path():
     """
     تحديد المسار الفعلي الدائم لقاعدة بيانات SQLite مع حماية تامة للبيانات السابقة.
-    يتحقق من وجود قاعدة بيانات سابقة في أي مسار دائم لمنع إنشاء ملف جديد فارغ وتجنب ضياع البيانات التراكمية.
+    يتحقق من وجود قاعدة بيانات سابقة في أي مسار دائم لمنع إنشاء ملف جديد فارغ وتجنب ضياع البيانات.
     """
     candidates = []
 
@@ -105,7 +129,7 @@ def get_db_path():
     if roaming:
         candidates.append(os.path.join(roaming, 'NasserCompanyApp', 'nasser_store.db'))
 
-    # 2. مسار مجلد Local AppData (لضمان قراءة واستئناف أي بيانات حُفظت مسبقاً)
+    # 2. مسار مجلد Local AppData
     local_app = os.environ.get('LOCALAPPDATA')
     if local_app:
         candidates.append(os.path.join(local_app, 'NasserCompanyApp', 'nasser_store.db'))
@@ -131,7 +155,7 @@ def get_db_path():
 
 def get_db_connection():
     """
-    إنشاء اتصال آمن بقاعدة البيانات مع تفعيل نمط WAL وتأمين الحفظ اللحظي على القرص الصلب (Auto-Commit & Full Sync).
+    إنشاء اتصال آمن بقاعدة البيانات مع تفعيل نمط WAL وتأمين الحفظ اللحظي على القرص الصلب.
     تفعيل مهلة انتظار 60 ثانية لمنع حدوث Database Lock وضمان إتمام المعاملات فورياً.
     """
     db_path = get_db_path()
@@ -144,8 +168,7 @@ def get_db_connection():
 
 def commit_and_sync(conn):
     """
-    تنفيذ الحفظ النهائي اللحظي وإغلاق المعاملة ودفع البيانات مباشرة للقرص الصلب (Hard Drive/SSD)
-    مما يضمن عدم بقاء أي تعديلات معلقة بالذاكرة المؤقتة (RAM) في حال إغلاق التطبيق أو انقطاع الطاقة.
+    تنفيذ الحفظ النهائي اللحظي وإغلاق المعاملة ودفع البيانات مباشرة للقرص الصلب.
     """
     try:
         conn.commit()
@@ -240,7 +263,7 @@ def init_sqlite_db():
                 )
             ''')
             
-            # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) لحل أي خطأ بالأعمدة القديمة ---
+            # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) ---
             def ensure_columns(table_name, columns_to_check):
                 try:
                     cursor.execute(f"PRAGMA table_info({table_name})")
@@ -254,7 +277,6 @@ def init_sqlite_db():
                 except Exception as e:
                     print(f"Schema check error on {table_name}:", e)
 
-            # ترقية جدول حركات المخزون للتأكد من وجود الأعمدة بالكامل
             ensure_columns('movements', [
                 ('reference_no', 'TEXT DEFAULT ""'),
                 ('product_id', 'TEXT DEFAULT ""'),
@@ -269,7 +291,6 @@ def init_sqlite_db():
                 ('created_at', 'TEXT DEFAULT ""')
             ])
 
-            # ترقية جدول المنتجات
             ensure_columns('products', [
                 ('code', 'TEXT DEFAULT ""'),
                 ('name', 'TEXT DEFAULT ""'),
@@ -282,7 +303,6 @@ def init_sqlite_db():
                 ('updated_at', 'TEXT DEFAULT ""')
             ])
 
-            # ترقية جدول المبيعات
             ensure_columns('sales', [
                 ('invoice_number', 'TEXT DEFAULT ""'),
                 ('created_at', 'TEXT DEFAULT ""'),
@@ -299,136 +319,124 @@ def init_sqlite_db():
                 ('notes', 'TEXT DEFAULT ""')
             ])
 
-            # --- فحص ومسح القائمة الافتراضية القديمة نهائياً وزرع البيانات الرسمية الجديدة (82 صنف) ---
-            cursor.execute("SELECT COUNT(*) FROM products WHERE name LIKE '%ماكينة إعداد القهوة%' OR name LIKE '%طاحونة حبوب القهوة%' OR name LIKE '%طابعة فواتير حرارية%' OR name LIKE '%فلتر تنقية%' OR name LIKE '%مقبض ضغط القهوة%' OR name LIKE '%ميزان إلكتروني ديجيتال%'")
-            has_old_demo = cursor.fetchone()[0] > 0
-
+            # --- فحص وإدخال البيانات الرسمية (82 صنف) فقط إذا كانت قاعدة البيانات فارغة تماماً ---
             cursor.execute("SELECT COUNT(*) FROM products")
             total_prods = cursor.fetchone()[0]
 
-            if has_old_demo or total_prods == 0:
-                print("🔄 SQLite Migration: Dropping old demo products and inserting 82 official seed items...")
-                cursor.execute("DELETE FROM products WHERE name LIKE '%ماكينة إعداد القهوة%' OR name LIKE '%طاحونة حبوب القهوة%' OR name LIKE '%طابعة فواتير حرارية%' OR name LIKE '%فلتر تنقية%' OR name LIKE '%مقبض ضغط القهوة%' OR name LIKE '%ميزان إلكتروني ديجيتال%' OR (code LIKE 'NASSER-10%' AND (id='prd_1' OR id='prd_2' OR id='prd_3' OR id='prd_4' OR id='prd_5' OR id='prd_6'))")
-                
-                cursor.execute("SELECT COUNT(*) FROM products")
-                if cursor.fetchone()[0] == 0:
-                    try:
-                        cursor.execute("DELETE FROM sqlite_sequence WHERE name='products'")
-                    except Exception:
-                        pass
-                    
-                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                    official_seed_groups = [
-                        ("سوق 21 أجهزة بركانية", [
-                            "شواية لحم",
-                            "ثلاجة حلويات",
-                            "ماكينة شاورما كهرباء",
-                            "مضارب",
-                            "آيس ميكر"
-                        ]),
-                        ("عام", [
-                            "طاولة السندوتش",
-                            "صواني قرص",
-                            "ميزان ساعة",
-                            "شواية مشكل",
-                            "حوضات",
-                            "ديسبنسر",
-                            "صحن السندوتش",
-                            "كرتونة زجاج",
-                            "شيخ الشواية",
-                            "فرامة أكياس + أخشاب",
-                            "شاورما دجاج",
-                            "غلاية لتر",
-                            "مبرد عصير",
-                            "منشر لحوم",
-                            "غلاية لتر كهرباء",
-                            "شواية عرض السندوتش",
-                            "بسكيت سمك",
-                            "شواية فراخ",
-                            "كرتونة صواني",
-                            "غلاية غاز",
-                            "قاطع سيخ شتراك صغير",
-                            "عصارة برتقال"
-                        ]),
-                        ("الأجهزة", [
-                            "طاولة السندوتش",
-                            "طباخة 2 شعلة فول",
-                            "م. السندوتش مرضى",
-                            "ماكينة بطاطس",
-                            "مبرد غاز",
-                            "فريزر هاير جديد",
-                            "ماكينة سمك",
-                            "شواية فراخ دوار",
-                            "غلاية لتر كهرباء",
-                            "ماكينة بروست ضغط",
-                            "صندل في مكان نائي يصعب الوصول إليه"
-                        ]),
-                        ("المخزن الشروق", [
-                            "شوايه فحم",
-                            "شاورما دبل",
-                            "غلايه غاز",
-                            "سخانات بروست أحمر",
-                            "فرن طبقة غاز",
-                            "مضرب نابوليتان",
-                            "بوفيه",
-                            "قلاب لحوم",
-                            "مسخنات بروست",
-                            "توستر",
-                            "كرتونه تقطيع بطاطس",
-                            "كرتونه ثلج",
-                            "قلايه 2 عين غاز",
-                            "وافل مدور + مربع",
-                            "ايس ميكر كيلو",
-                            "منشار لحمه",
-                            "كسارة ثلج",
-                            "ماكينه كاشير",
-                            "بروست",
-                            "فرن طابق",
-                            "شوايه لحم",
-                            "غلايه كهرباء لتر"
-                        ]),
-                        ("مخزن العمدة غرب", [
-                            "حوض عين",
-                            "راس شاورما",
-                            "ثلاجة حلويات",
-                            "شواية فحم",
-                            "ثلاجة عرض السندوتش",
-                            "مفرمة",
-                            "سخان بروست",
-                            "كابتشينو",
-                            "خلاط لتر",
-                            "سخانة منزلية",
-                            "مسن بروست",
-                            "مفرمة لحم",
-                            "خلاط لتر ك",
-                            "كسارة ثلج",
-                            "كبسة دبل مفرد",
-                            "قلاية مفرد غاز",
-                            "كبس سمك",
-                            "سخان ماء بويلر",
-                            "ماكينة تتبيل بروست",
-                            "كرتونة صحون",
-                            "وافل مربع",
-                            "فرن مدور"
-                        ])
-                    ]
+            if total_prods == 0:
+                print("🔄 SQLite Initialization: Inserting 82 official seed items...")
+                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                official_seed_groups = [
+                    ("سوق 21 أجهزة بركانية", [
+                        "شواية لحم",
+                        "ثلاجة حلويات",
+                        "ماكينة شاورما كهرباء",
+                        "مضارب",
+                        "آيس ميكر"
+                    ]),
+                    ("عام", [
+                        "طاولة السندوتش",
+                        "صواني قرص",
+                        "ميزان ساعة",
+                        "شواية مشكل",
+                        "حوضات",
+                        "ديسبنسر",
+                        "صحن السندوتش",
+                        "كرتونة زجاج",
+                        "شيخ الشواية",
+                        "فرامة أكياس + أخشاب",
+                        "شاورما دجاج",
+                        "غلاية لتر",
+                        "مبرد عصير",
+                        "منشر لحوم",
+                        "غلاية لتر كهرباء",
+                        "شواية عرض السندوتش",
+                        "بسكيت سمك",
+                        "شواية فراخ",
+                        "كرتونة صواني",
+                        "غلاية غاز",
+                        "قاطع سيخ شتراك صغير",
+                        "عصارة برتقال"
+                    ]),
+                    ("الأجهزة", [
+                        "طاولة السندوتش",
+                        "طباخة 2 شعلة فول",
+                        "م. السندوتش مرضى",
+                        "ماكينة بطاطس",
+                        "مبرد غاز",
+                        "فريزر هاير جديد",
+                        "ماكينة سمك",
+                        "شواية فراخ دوار",
+                        "غلاية لتر كهرباء",
+                        "ماكينة بروست ضغط",
+                        "صندل في مكان نائي يصعب الوصول إليه"
+                    ]),
+                    ("المخزن الشروق", [
+                        "شوايه فحم",
+                        "شاورما دبل",
+                        "غلايه غاز",
+                        "سخانات بروست أحمر",
+                        "فرن طبقة غاز",
+                        "مضرب نابوليتان",
+                        "بوفيه",
+                        "قلاب لحوم",
+                        "مسخنات بروست",
+                        "توستر",
+                        "كرتونه تقطيع بطاطس",
+                        "كرتونه ثلج",
+                        "قلايه 2 عين غاز",
+                        "وافل مدور + مربع",
+                        "ايس ميكر كيلو",
+                        "منشار لحمه",
+                        "كسارة ثلج",
+                        "ماكينه كاشير",
+                        "بروست",
+                        "فرن طابق",
+                        "شوايه لحم",
+                        "غلايه كهرباء لتر"
+                    ]),
+                    ("مخزن العمدة غرب", [
+                        "حوض عين",
+                        "راس شاورما",
+                        "ثلاجة حلويات",
+                        "شواية فحم",
+                        "ثلاجة عرض السندوتش",
+                        "مفرمة",
+                        "سخان بروست",
+                        "كابتشينو",
+                        "خلاط لتر",
+                        "سخانة منزلية",
+                        "مسن بروست",
+                        "مفرمة لحم",
+                        "خلاط لتر ك",
+                        "كسارة ثلج",
+                        "كبسة دبل مفرد",
+                        "قلاية مفرد غاز",
+                        "كبس سمك",
+                        "سخان ماء بويلر",
+                        "ماكينة تتبيل بروست",
+                        "كرتونة صحون",
+                        "وافل مربع",
+                        "فرن مدور"
+                    ])
+                ]
 
-                    seq_counter = 1
-                    for grp_cat, grp_items in official_seed_groups:
-                        for grp_name in grp_items:
-                            p_code = f"NASSER-{100 + seq_counter}"
-                            cursor.execute('''
-                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
-                            
-                            row_id = cursor.lastrowid
-                            m_id = f"mvt_init_{row_id}"
-                            cursor.execute('''
-                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (m_id, 'OPENING-INIT', str(row_id), p_code, grp_name.strip(), 'IN', 10, 0, 10, 'رصيد افتتاحي رسمي مسجل بالمستودع', 'المدير العام', now_iso))
-                            seq_counter += 1
+                seq_counter = 1
+                for grp_cat, grp_items in official_seed_groups:
+                    for grp_name in grp_items:
+                        p_code = f"NASSER-{100 + seq_counter}"
+                        cursor.execute('''
+                            INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
+                        
+                        row_id = cursor.lastrowid
+                        m_id = f"mvt_init_{row_id}"
+                        cursor.execute('''
+                            INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (m_id, 'OPENING-INIT', str(row_id), p_code, grp_name.strip(), 'IN', 10, 0, 10, 'رصيد افتتاحي رسمي مسجل بالمستودع', 'المدير العام', now_iso))
+                        seq_counter += 1
 
             # تعبئة حسابات المستخدمين إذا كانت فارغة
             cursor.execute("SELECT COUNT(*) FROM users")
@@ -470,19 +478,23 @@ def add_audit_log(username, role, action, details, log_type='INFO'):
         print("Log error:", e)
 
 # --- 3. EMBEDDED HTTP SERVER WITH COMPLETE SQLITE REST API ---
-def find_free_port():
-    """البحث عن منفذ شبكة محلي متاح تلقائياً"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('127.0.0.1', 0))
-        return s.getsockname()[1]
-
 class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    """خادم محلي متكامل يربط الواجهة بقاعدة بيانات SQLite المحلية بحفظ فوري ودائم"""
+    """خادم محلي متكامل ومحصن يربط الواجهة بقاعدة بيانات SQLite المحلية بحفظ فوري ودائم وحماية تامة ضد ERR_EMPTY_RESPONSE"""
+    protocol_version = "HTTP/1.1"
     
     def __init__(self, *args, **kwargs):
         directory = get_dist_path()
         super().__init__(*args, directory=directory, **kwargs)
     
+    def log_message(self, format, *args):
+        """إلغاء أو تأمين تسجيل السجلات لمنع انهيار الخادم عند تشغيله بدون موجه أوامر (Windows --noconsole)"""
+        try:
+            if sys.stderr is not None:
+                sys.stderr.write("%s - - [%s] %s
+" % (self.address_string(), self.log_date_time_string(), format % args))
+        except Exception:
+            pass
+
     def _send_json(self, data, code=200):
         try:
             body_bytes = json.dumps(data, ensure_ascii=False).encode('utf-8')
@@ -492,10 +504,99 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
             self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.send_header('Connection', 'keep-alive')
             self.end_headers()
             self.wfile.write(body_bytes)
+            self.wfile.flush()
         except Exception as e:
-            print("HTTP Send error:", e)
+            pass
+
+    def _serve_file(self, filepath):
+        """إرسال ملفات الواجهة (HTML, JS, CSS, Assets) بترميز ثنائي دقيق مع ترويسات Content-Length لمنع أخطاء ERR_EMPTY_RESPONSE"""
+        try:
+            if not os.path.isfile(filepath):
+                return self._serve_fallback_html()
+            
+            with open(filepath, 'rb') as f:
+                content = f.read()
+            
+            ext = os.path.splitext(filepath)[1].lower()
+            mime_map = {
+                '.html': 'text/html; charset=utf-8',
+                '.js': 'application/javascript; charset=utf-8',
+                '.mjs': 'application/javascript; charset=utf-8',
+                '.css': 'text/css; charset=utf-8',
+                '.json': 'application/json; charset=utf-8',
+                '.svg': 'image/svg+xml',
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.gif': 'image/gif',
+                '.ico': 'image/x-icon',
+                '.woff': 'font/woff',
+                '.woff2': 'font/woff2',
+                '.ttf': 'font/ttf',
+                '.eot': 'application/vnd.ms-fontobject',
+                '.webp': 'image/webp'
+            }
+            content_type = mime_map.get(ext, mimetypes.guess_type(filepath)[0] or 'application/octet-stream')
+
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(content)))
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            self.wfile.write(content)
+            self.wfile.flush()
+        except Exception as e:
+            try:
+                self._send_json({"error": "File Read Error", "details": str(e)}, 500)
+            except Exception:
+                pass
+
+    def _serve_fallback_html(self):
+        """صفحة استرداد وبدء تشغيل احترافية تمنع ظهور أي شاشة خطأ بالمتصفح أثناء التحميل أو المزامنة"""
+        html = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>شركة NASSER - جاري تشغيل النظام</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background: #1e293b; padding: 2.5rem; border-radius: 1rem; border: 1px solid #334155; text-align: center; max-width: 480px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+        .logo { font-size: 1.75rem; font-weight: 900; color: #38bdf8; margin-bottom: 0.5rem; }
+        .sub { font-size: 0.95rem; color: #94a3b8; margin-bottom: 1.5rem; }
+        .spinner { border: 3px solid rgba(56, 189, 248, 0.1); border-top: 3px solid #38bdf8; border-radius: 50%; width: 36px; height: 36px; animation: spin 1s linear infinite; margin: 0 auto 1.5rem; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .btn { background: #0284c7; color: white; border: none; padding: 0.6rem 1.5rem; border-radius: 0.5rem; font-weight: bold; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">شركة NASSER</div>
+        <div class="sub">نظام إدارة المخازن والمبيعات - جاري تهيئة الاتصال المحلي...</div>
+        <div class="spinner"></div>
+        <button class="btn" onclick="location.reload()">تحديث الصفحة الآن</button>
+    </div>
+    <script>
+        setTimeout(() => location.reload(), 2000);
+    </script>
+</body>
+</html>"""
+        try:
+            body = html.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+        except Exception:
+            pass
 
     def _read_json_body(self):
         try:
@@ -504,27 +605,47 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length)
                 return json.loads(body.decode('utf-8'))
         except Exception as e:
-            print("JSON parse error:", e)
+            pass
         return {}
 
     def _find_product(self, cursor, p_id):
-        """Universal resilient product lookup supporting ID, exact code, case-insensitive, and space/dash-free code"""
+        """Universal resilient product lookup supporting ID, exact code, numeric code (e.g. 1001 or NASSER-1001), trimmed name, and space/dash-free dense code"""
         if not p_id:
             return None
         p_id_str = str(p_id).strip()
+        if p_id_str.lower() in ('', 'none', 'null', 'undefined'):
+            return None
+
         # 1. Exact match on id or code
         cursor.execute("SELECT id, code, name, stock, price FROM products WHERE id=? OR code=?", (p_id_str, p_id_str))
         row = cursor.fetchone()
         if row:
             return row
-        # 2. Case-insensitive trimmed match
+
+        # 2. Case-insensitive trimmed match on code or id
         cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?)) OR LOWER(TRIM(id))=LOWER(TRIM(?))", (p_id_str, p_id_str))
         row = cursor.fetchone()
         if row:
             return row
-        # 3. Dense alphanumeric match (ignoring spaces, hyphens, underscores, slashes, dots safely)
+
+        # 3. Exact or trimmed match on name
+        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(name))=LOWER(TRIM(?))", (p_id_str,))
+        row = cursor.fetchone()
+        if row:
+            return row
+
+        # 4. If p_id_str contains numbers e.g. "1001", check if code is "NASSER-1001" or ends with "-1001" or contains 1001
+        nums = re.findall(r'd+', p_id_str)
+        if nums:
+            num_str = nums[0]
+            cursor.execute("SELECT id, code, name, stock, price FROM products WHERE code=? OR code LIKE ? OR id=?", (num_str, f"%{num_str}", num_str))
+            num_row = cursor.fetchone()
+            if num_row:
+                return num_row
+
+        # 5. Dense alphanumeric match (ignoring spaces, hyphens, underscores, slashes, dots safely)
         try:
-            dense_target = re.sub(r'[\s_./-]', '', p_id_str).lower()
+            dense_target = re.sub(r'[s_./-]', '', p_id_str).lower()
         except Exception:
             dense_target = ''.join(c for c in p_id_str if c.isalnum()).lower()
 
@@ -532,154 +653,179 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             cursor.execute("SELECT id, code, name, stock, price FROM products")
             for prod_row in cursor.fetchall():
                 try:
-                    p_code_dense = re.sub(r'[\s_./-]', '', str(prod_row[1] or '')).lower()
-                    p_id_dense = re.sub(r'[\s_./-]', '', str(prod_row[0] or '')).lower()
+                    p_code_dense = re.sub(r'[s_./-]', '', str(prod_row[1] or '')).lower()
+                    p_id_dense = re.sub(r'[s_./-]', '', str(prod_row[0] or '')).lower()
+                    p_name_dense = re.sub(r'[s_./-]', '', str(prod_row[2] or '')).lower()
                 except Exception:
                     p_code_dense = ''.join(c for c in str(prod_row[1] or '') if c.isalnum()).lower()
                     p_id_dense = ''.join(c for c in str(prod_row[0] or '') if c.isalnum()).lower()
+                    p_name_dense = ''.join(c for c in str(prod_row[2] or '') if c.isalnum()).lower()
 
-                if p_code_dense == dense_target or p_id_dense == dense_target:
+                if p_code_dense == dense_target or p_id_dense == dense_target or p_name_dense == dense_target:
                     return prod_row
         return None
 
     def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
+        try:
+            self.send_response(200)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.send_header('Content-Length', '0')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+        except Exception:
+            pass
 
     def do_GET(self):
-        parsed_path = self.path.split('?')[0]
-        
-        # 0. Health Check
-        if parsed_path == '/api/health':
-            return self._send_json({"status": "ok", "company": "شركة NASSER", "system": "إدارة المخازن والمبيعات", "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')})
-
-        # 1. API GET Products
-        if parsed_path == '/api/products':
-            try:
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT id, code, name, category, stock, min_stock, unit, price, description, updated_at FROM products ORDER BY rowid DESC")
-                        rows = cursor.fetchall()
-                    finally:
-                        conn.close()
-
-                products = [{
-                    "id": str(r[0]), "code": r[1], "name": r[2], "category": r[3],
-                    "stock": r[4], "minStock": r[5], "unit": r[6], "price": r[7] if r[7] is not None else 0,
-                    "description": r[8] or "", "updatedAt": r[9] or ""
-                } for r in rows]
-                return self._send_json({"success": True, "products": products})
-            except Exception as e:
-                return self._send_json({"success": False, "error": str(e)}, 500)
-
-        # 2. API GET Sales
-        if parsed_path == '/api/sales':
-            try:
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes FROM sales ORDER BY created_at DESC")
-                        rows = cursor.fetchall()
-                    finally:
-                        conn.close()
-
-                sales = [{
-                    "id": r[0], "invoiceNumber": r[1], "deliveryOrderRef": r[1], "createdAt": r[2],
-                    "customerName": r[3] or "", "customerPhone": r[4] or "",
-                    "cashierId": r[5] or "", "cashierName": r[6],
-                    "subtotal": r[7], "discount": r[8], "tax": r[9], "total": r[10],
-                    "paymentMethod": r[11], "items": json.loads(r[12]), "notes": r[13] or ""
-                } for r in rows]
-                return self._send_json({"success": True, "sales": sales})
-            except Exception as e:
-                return self._send_json({"success": False, "error": str(e)}, 500)
-
-        # 3. API GET Movements
-        if parsed_path == '/api/movements':
-            try:
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            SELECT id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at
-                            FROM movements
-                            ORDER BY created_at DESC
-                        ''')
-                        rows = cursor.fetchall()
-                    finally:
-                        conn.close()
-
-                movements = [{
-                    "id": r[0],
-                    "referenceNo": r[1] or "",
-                    "productId": r[2],
-                    "productCode": r[3] or "",
-                    "productName": r[4] or "صنف مخزني",
-                    "type": r[5],
-                    "quantity": r[6],
-                    "previousStock": r[7] if r[7] is not None else 0,
-                    "newStock": r[8] if r[8] is not None else 0,
-                    "reason": r[9] or "",
-                    "operatorName": r[10] or "أمين المخزن",
-                    "timestamp": r[11] or ""
-                } for r in rows]
-                return self._send_json({"success": True, "movements": movements})
-            except Exception as e:
-                return self._send_json({"success": False, "error": str(e)}, 500)
-
-        # 4. API GET Users
-        if parsed_path == '/api/users':
-            try:
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT id, username, name, role, gmail, created_at FROM users")
-                        rows = cursor.fetchall()
-                    finally:
-                        conn.close()
-
-                users = [{
-                    "id": r[0], "username": r[1], "name": r[2],
-                    "role": r[3], "gmail": r[4], "createdAt": r[5]
-                } for r in rows]
-                return self._send_json({"success": True, "users": users})
-            except Exception as e:
-                return self._send_json({"success": False, "error": str(e)}, 500)
-
-        # 5. API GET Logs
-        if parsed_path == '/api/logs':
-            try:
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT id, timestamp, username, role, action, details, type FROM logs ORDER BY timestamp DESC LIMIT 200")
-                        rows = cursor.fetchall()
-                    finally:
-                        conn.close()
-
-                logs = [{
-                    "id": r[0], "timestamp": r[1], "username": r[2],
-                    "role": r[3], "action": r[4], "details": r[5], "type": r[6]
-                } for r in rows]
-                return self._send_json({"success": True, "logs": logs})
-            except Exception as e:
-                return self._send_json({"success": False, "error": str(e)}, 500)
-
-        # 6. SPA Fallback
-        req_path = self.translate_path(self.path)
-        if not os.path.exists(req_path) or os.path.isdir(req_path):
-            self.path = '/index.html'
+        try:
+            parsed_path = self.path.split('?')[0].split('#')[0]
             
-        return super().do_GET()
+            # 0. Health Check
+            if parsed_path == '/api/health':
+                return self._send_json({"status": "ok", "company": "شركة NASSER", "system": "إدارة المخازن والمبيعات", "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')})
+
+            # 1. API GET Products
+            if parsed_path == '/api/products':
+                try:
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT id, code, name, category, stock, min_stock, unit, price, description, updated_at FROM products ORDER BY rowid DESC")
+                            rows = cursor.fetchall()
+                        finally:
+                            conn.close()
+
+                    products = [{
+                        "id": str(r[0]), "code": r[1], "name": r[2], "category": r[3],
+                        "stock": r[4], "minStock": r[5], "unit": r[6], "price": r[7] if r[7] is not None else 0,
+                        "description": r[8] or "", "updatedAt": r[9] or ""
+                    } for r in rows]
+                    return self._send_json({"success": True, "products": products})
+                except Exception as e:
+                    return self._send_json({"success": False, "error": str(e)}, 500)
+
+            # 2. API GET Sales
+            if parsed_path == '/api/sales':
+                try:
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes FROM sales ORDER BY created_at DESC")
+                            rows = cursor.fetchall()
+                        finally:
+                            conn.close()
+
+                    sales = [{
+                        "id": r[0], "invoiceNumber": r[1], "deliveryOrderRef": r[1], "createdAt": r[2],
+                        "customerName": r[3] or "", "customerPhone": r[4] or "",
+                        "cashierId": r[5] or "", "cashierName": r[6],
+                        "subtotal": r[7], "discount": r[8], "tax": r[9], "total": r[10],
+                        "paymentMethod": r[11], "items": json.loads(r[12]) if r[12] else [], "notes": r[13] or ""
+                    } for r in rows]
+                    return self._send_json({"success": True, "sales": sales})
+                except Exception as e:
+                    return self._send_json({"success": False, "error": str(e)}, 500)
+
+            # 3. API GET Movements
+            if parsed_path == '/api/movements':
+                try:
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                                SELECT id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at
+                                FROM movements
+                                ORDER BY created_at DESC
+                            ''')
+                            rows = cursor.fetchall()
+                        finally:
+                            conn.close()
+
+                    movements = [{
+                        "id": r[0],
+                        "referenceNo": r[1] or "",
+                        "productId": r[2],
+                        "productCode": r[3] or "",
+                        "productName": r[4] or "صنف مخزني",
+                        "type": r[5],
+                        "quantity": r[6],
+                        "previousStock": r[7] if r[7] is not None else 0,
+                        "newStock": r[8] if r[8] is not None else 0,
+                        "reason": r[9] or "",
+                        "operatorName": r[10] or "أمين المخزن",
+                        "timestamp": r[11] or ""
+                    } for r in rows]
+                    return self._send_json({"success": True, "movements": movements})
+                except Exception as e:
+                    return self._send_json({"success": False, "error": str(e)}, 500)
+
+            # 4. API GET Users
+            if parsed_path == '/api/users':
+                try:
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT id, username, name, role, gmail, created_at FROM users")
+                            rows = cursor.fetchall()
+                        finally:
+                            conn.close()
+
+                    users = [{
+                        "id": r[0], "username": r[1], "name": r[2],
+                        "role": r[3], "gmail": r[4], "createdAt": r[5]
+                    } for r in rows]
+                    return self._send_json({"success": True, "users": users})
+                except Exception as e:
+                    return self._send_json({"success": False, "error": str(e)}, 500)
+
+            # 5. API GET Logs
+            if parsed_path == '/api/logs':
+                try:
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT id, timestamp, username, role, action, details, type FROM logs ORDER BY timestamp DESC LIMIT 200")
+                            rows = cursor.fetchall()
+                        finally:
+                            conn.close()
+
+                    logs = [{
+                        "id": r[0], "timestamp": r[1], "username": r[2],
+                        "role": r[3], "action": r[4], "details": r[5], "type": r[6]
+                    } for r in rows]
+                    return self._send_json({"success": True, "logs": logs})
+                except Exception as e:
+                    return self._send_json({"success": False, "error": str(e)}, 500)
+
+            if parsed_path.startswith('/api/'):
+                return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
+
+            # 6. Static File Serving & Single Page App (SPA) Fallback
+            dist_dir = get_dist_path()
+            req_rel = parsed_path.lstrip('/')
+            req_file = os.path.join(dist_dir, req_rel) if req_rel else os.path.join(dist_dir, 'index.html')
+
+            if os.path.isfile(req_file):
+                return self._serve_file(req_file)
+
+            # SPA Routing: Send index.html for all non-file route paths
+            index_path = os.path.join(dist_dir, 'index.html')
+            if os.path.isfile(index_path):
+                return self._serve_file(index_path)
+
+            # In case dist is not built yet or index.html missing
+            return self._serve_fallback_html()
+        except Exception as e:
+            try:
+                self._send_json({"success": False, "error": str(e)}, 500)
+            except Exception:
+                pass
 
     def do_POST(self):
         parsed_path = self.path.split('?')[0]
@@ -813,22 +959,29 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         cursor = conn.cursor()
                         
-                        # Auto code generation if empty
+                        # Auto code generation with strict NASSER- formatting
                         code = (data.get('code') or '').strip()
+                        cursor.execute("SELECT id, code FROM products")
+                        all_prods = cursor.fetchall()
+                        max_num = 100
+                        for c in all_prods:
+                            m = re.findall(r'[0-9]+', str(c[1]))
+                            if m:
+                                max_num = max(max_num, int(m[-1]))
+                            try:
+                                max_num = max(max_num, int(c[0]))
+                            except Exception:
+                                pass
+
                         if not code:
-                            cursor.execute("SELECT code FROM products")
-                            all_codes = cursor.fetchall()
-                            max_num = 100
-                            for c in all_codes:
-                                m = re.findall(r'[0-9]+', str(c[0]))
-                                if m:
-                                    max_num = max(max_num, int(m[-1]))
                             code = f"NASSER-{max_num + 1}"
+                        elif not code.upper().startswith('NASSER-'):
+                            code = f"NASSER-{code}"
                         
                         # Handle unique constraint collision
                         cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (code,))
                         if cursor.fetchone()[0] > 0:
-                            code = f"{code}-{int(time.time()) % 1000}"
+                            code = f"NASSER-{max_num + 1}_{int(time.time()) % 100}"
 
                         # Insert using SQLite native AUTOINCREMENT for primary key
                         cursor.execute('''
@@ -879,7 +1032,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         # Baseline numeric code
                         cursor.execute("SELECT code FROM products")
                         all_codes = cursor.fetchall()
-                        max_num = 1000
+                        max_num = 100
                         for c in all_codes:
                             m = re.findall(r'[0-9]+', str(c[0]))
                             if m:
@@ -890,7 +1043,13 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             if not p_name:
                                 continue
                             max_num += 1
-                            p_code = (itm.get('code') or '').strip() or f"{max_num}"
+                            raw_code = (itm.get('code') or '').strip()
+                            if not raw_code:
+                                p_code = f"NASSER-{max_num}"
+                            elif not raw_code.upper().startswith('NASSER-'):
+                                p_code = f"NASSER-{raw_code}"
+                            else:
+                                p_code = raw_code
                             
                             # Ensure code uniqueness
                             cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (p_code,))
@@ -937,7 +1096,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if parsed_path == '/api/movements':
             try:
                 data = self._read_json_body()
-                p_id = str(data.get('productId', '')).strip()
+                p_id_raw = str(data.get('productId') or data.get('productCode') or data.get('code') or data.get('productName') or data.get('name') or '').strip()
                 m_type = data.get('type', 'OUT')
                 ref_no = data.get('referenceNo', '')
                 reason_str = data.get('reason', '')
@@ -955,16 +1114,20 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         cursor = conn.cursor()
 
-                        p_row = self._find_product(cursor, p_id)
+                        p_row = self._find_product(cursor, p_id_raw)
+                        if not p_row and data.get('productCode'):
+                            p_row = self._find_product(cursor, data.get('productCode'))
+                        if not p_row and data.get('productName'):
+                            p_row = self._find_product(cursor, data.get('productName'))
                         
-                        actual_id = p_id
-                        p_code = ""
-                        p_name = "صنف مخزني"
+                        actual_id = p_id_raw
+                        p_code = data.get('productCode') or ""
+                        p_name = data.get('productName') or "صنف مخزني"
                         previous_stock = 0
                         new_stock = 0
 
                         if p_row:
-                            actual_id = p_row[0]
+                            actual_id = str(p_row[0])
                             p_code = p_row[1]
                             p_name = p_row[2]
                             previous_stock = int(p_row[3])
@@ -1006,11 +1169,11 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "timestamp": now_iso
                 }
                 add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'حركة مخزنية', f"{m_type} - {p_name} ({qty}) - الرصيد الجديد: {new_stock}", 'MOVEMENT')
-                return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات الدائمة SQLite بنجاح"})
+                return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات بنجاح"})
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
-        # 8.2 BATCH MOVEMENTS ENDPOINT (Atomic Invoice Processing - Solves Database Lock)
+        # 9. BATCH MOVEMENTS ENDPOINT (Atomic Invoice Processing - Solves Database Lock)
         if parsed_path == '/api/movements/batch':
             try:
                 data = self._read_json_body()
@@ -1031,28 +1194,39 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                         # مرحلة التحقق أولاً: التأكد من توفر الرصيد لجميع الأصناف
                         for idx, itm in enumerate(items):
-                            p_id = str(itm.get('productId', '')).strip()
+                            p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
                             try:
                                 qty = max(1, int(itm.get('quantity', 1)))
                             except Exception:
                                 qty = 1
                             
-                            p_row = self._find_product(cursor, p_id)
+                            p_row = self._find_product(cursor, p_id_key)
+                            if not p_row and itm.get('productCode'):
+                                p_row = self._find_product(cursor, itm.get('productCode'))
+                            if not p_row and itm.get('productName'):
+                                p_row = self._find_product(cursor, itm.get('productName'))
+
                             if not p_row:
-                                return self._send_json({"success": False, "message": f"الصنف ذو المعرف أو الكود ({p_id}) غير موجود بالمخزن"}, 404)
+                                label = itm.get('productName') or itm.get('productCode') or p_id_key or f"بند {idx+1}"
+                                return self._send_json({"success": False, "message": f"الصنف ({label}) غير موجود بالمخزن"}, 404)
                             if int(p_row[3]) < qty:
                                 return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {p_row[3]} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
 
                         # مرحلة التنفيذ الذري: خصم الكميات وتسجيل الحركات دفعة واحدة
                         for idx, itm in enumerate(items):
-                            p_id = str(itm.get('productId', '')).strip()
+                            p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
                             try:
                                 qty = max(1, int(itm.get('quantity', 1)))
                             except Exception:
                                 qty = 1
 
-                            p_row = self._find_product(cursor, p_id)
-                            actual_id, p_code, p_name, prev_stock = p_row[0], p_row[1], p_row[2], int(p_row[3])
+                            p_row = self._find_product(cursor, p_id_key)
+                            if not p_row and itm.get('productCode'):
+                                p_row = self._find_product(cursor, itm.get('productCode'))
+                            if not p_row and itm.get('productName'):
+                                p_row = self._find_product(cursor, itm.get('productName'))
+
+                            actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3])
                             new_stock = max(0, prev_stock - qty)
 
                             cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
@@ -1087,92 +1261,43 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
-        # 9. Add Sale Invoice
+        # 10. Add Sale Invoice Record
         if parsed_path == '/api/sales':
             try:
                 data = self._read_json_body()
                 items = data.get('items', [])
+                customer_name = data.get('customerName', '').strip()
+                customer_phone = data.get('customerPhone', '').strip()
+                cashier_name = data.get('cashierName', 'مسؤول المبيعات').strip()
+                cashier_id = data.get('cashierId', 'usr_1')
+                subtotal = float(data.get('subtotal', 0.0))
+                discount = float(data.get('discount', 0.0))
+                tax = float(data.get('tax', 0.0))
+                total = float(data.get('total', subtotal - discount + tax))
+                payment_method = data.get('paymentMethod', 'CASH')
+                notes = data.get('notes', '')
+                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
                 
                 with DB_LOCK:
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
-                        
                         cursor.execute("SELECT COUNT(*) FROM sales")
                         count = cursor.fetchone()[0] + 1
-                        invoice_num = f"INV-{time.strftime('%Y%m')}-{count:04d}"
-                        
+                        invoice_num = data.get('invoiceNumber') or f"INV-{time.strftime('%Y%m')}-{count:04d}"
                         sale_id = f"sale_{int(time.time()*1000)}"
-                        created_at = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                        
+
                         cursor.execute('''
                             INSERT INTO sales (id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (
-                            sale_id, invoice_num, created_at,
-                            data.get('customerName', 'عميل نقدي'),
-                            data.get('customerPhone', ''),
-                            data.get('cashierId', 'usr_1'),
-                            data.get('cashierName', 'الكاشير'),
-                            data.get('subtotal', 0),
-                            data.get('discount', 0),
-                            data.get('tax', 0),
-                            data.get('total', 0),
-                            data.get('paymentMethod', 'CASH'),
-                            json.dumps(items, ensure_ascii=False),
-                            data.get('notes', '')
-                        ))
-                        
-                        for itm in items:
-                            p_code = itm.get('productCode')
-                            p_id = itm.get('productId')
-                            try:
-                                qty = int(itm.get('quantity', 1))
-                            except Exception:
-                                qty = 1
-                            
-                            p_row = self._find_product(cursor, p_code or p_id)
-                            if p_row:
-                                cursor.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?", (qty, p_row[0]))
-                        
-                        commit_and_sync(conn)
-                    finally:
-                        conn.close()
-                
-                new_sale = {
-                    "id": sale_id, "invoiceNumber": invoice_num, "deliveryOrderRef": invoice_num, "createdAt": created_at,
-                    "customerName": data.get('customerName', 'عميل نقدي'),
-                    "customerPhone": data.get('customerPhone', ''),
-                    "cashierId": data.get('cashierId', 'usr_1'),
-                    "cashierName": data.get('cashierName', 'الكاشير'),
-                    "subtotal": data.get('subtotal', 0), "discount": data.get('discount', 0),
-                    "tax": data.get('tax', 0), "total": data.get('total', 0),
-                    "paymentMethod": data.get('paymentMethod', 'CASH'),
-                    "items": items, "notes": data.get('notes', '')
-                }
-                return self._send_json({"success": True, "sale": new_sale, "message": "تم حفظ الفاتورة بنجاح في قاعدة البيانات المحلية"})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
+                        ''', (sale_id, invoice_num, now_iso, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, json.dumps(items, ensure_ascii=False), notes))
 
-        # 10. Add User
-        if parsed_path == '/api/users':
-            try:
-                data = self._read_json_body()
-                u_id = f"usr_{int(time.time()*1000)}"
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            INSERT INTO users (id, username, password, name, role, gmail, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ''', (u_id, data.get('username'), data.get('password', '123456'), data.get('name'), data.get('role', 'WAREHOUSE_MANAGER'), data.get('gmail', ''), now_iso))
                         commit_and_sync(conn)
                     finally:
                         conn.close()
 
-                return self._send_json({"success": True, "user": {"id": u_id, "username": data.get('username'), "name": data.get('name'), "role": data.get('role'), "gmail": data.get('gmail')}})
+                add_audit_log(cashier_name, 'WAREHOUSE_MANAGER', 'تسجيل فاتورة', f"تم تسجيل فاتورة مبيعات رقم [{invoice_num}] بقيمة {total}", 'MOVEMENT')
+                return self._send_json({"success": True, "invoiceNumber": invoice_num, "message": "تم حفظ الفاتورة بنجاح"})
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
@@ -1190,14 +1315,19 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
-                        
-                        # Fetch existing stock to check for adjustment
                         row = self._find_product(cursor, p_id)
-                        actual_id = row[0] if row else p_id
+                        if not row and data.get('code'):
+                            row = self._find_product(cursor, data.get('code'))
+                        if not row and data.get('name'):
+                            row = self._find_product(cursor, data.get('name'))
+
+                        actual_id = str(row[0]) if row else str(p_id)
+                        old_code = row[1] if row else (data.get('code') or '')
+                        old_name = row[2] if row else (data.get('name') or '')
                         
                         if row:
-                            old_stock = row[3]
-                            old_price = row[4] if len(row) > 4 else 0.0
+                            old_stock = int(row[3])
+                            old_price = float(row[4]) if len(row) > 4 else 0.0
                             new_stock = int(data.get('stock', old_stock))
                             new_price = float(data.get('price', old_price))
                             if new_stock != old_stock:
@@ -1206,28 +1336,49 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                 cursor.execute('''
                                     INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', (mov_id, 'MANUAL-ADJUST', actual_id, data.get('code', row[1]), data.get('name', row[2]), 'ADJUSTMENT', abs(diff), old_stock, new_stock, f"تعديل يدوي للرصيد ({'+' if diff > 0 else ''}{diff})", data.get('username') or 'المدير العام', now_iso))
+                                ''', (mov_id, 'MANUAL-ADJUST', actual_id, data.get('code', old_code), data.get('name', old_name), 'ADJUSTMENT', abs(diff), old_stock, new_stock, f"تعديل يدوي للرصيد ({'+' if diff > 0 else ''}{diff})", data.get('username') or 'المدير العام', now_iso))
+
+                        raw_code = (data.get('code') or old_code).strip()
+                        if not raw_code:
+                            p_code = f"NASSER-{actual_id}"
+                        elif not raw_code.upper().startswith('NASSER-'):
+                            p_code = f"NASSER-{raw_code}"
+                        else:
+                            p_code = raw_code
+
+                        p_name = (data.get('name') or old_name).strip()
+                        p_cat = data.get('category') or 'عام'
+                        p_stock = max(0, int(data.get('stock', 0)))
+                        p_min = max(1, int(data.get('minStock', 5)))
+                        p_unit = data.get('unit') or 'وحدة'
+                        p_price = max(0.0, float(data.get('price', 0.0)))
+                        p_desc = data.get('description') or ''
 
                         cursor.execute('''
                             UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
                             WHERE id=? OR code=?
-                        ''', (
-                            data.get('code'), data.get('name'), data.get('category', 'عام'),
-                            int(data.get('stock', 0)),
-                            int(data.get('minStock', 5)), data.get('unit', 'وحدة'),
-                            float(data.get('price', 0)),
-                            data.get('description', ''), now_iso, actual_id, actual_id
-                        ))
+                        ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, actual_id))
+                        
+                        if cursor.rowcount == 0:
+                            cursor.execute('''
+                                UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
+                                WHERE id=? OR code=? OR name=?
+                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, p_id, p_id, p_name))
+
                         commit_and_sync(conn)
                     finally:
                         conn.close()
 
-                add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'تعديل صنف', f"تم تحديث بيانات الصنف [{data.get('code')}] {data.get('name')}", 'INFO')
-                return self._send_json({"success": True, "message": "تم تحديث الصنف وحفظ التعديلات نهائياً"})
+                add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'تعديل صنف', f"تم تحديث بيانات الصنف [{p_code}] {p_name}", 'INFO')
+                return self._send_json({"success": True, "message": "تم تحديث الصنف وحفظ التعديلات نهائياً", "product": {
+                    "id": actual_id, "code": p_code, "name": p_name, "category": p_cat,
+                    "stock": p_stock, "minStock": p_min, "unit": p_unit, "price": p_price,
+                    "description": p_desc, "updatedAt": now_iso
+                }})
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
-        return self._send_json({"success": False}, 404)
+        return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
 
     def do_DELETE(self):
         parsed_path = self.path.split('?')[0]
@@ -1239,52 +1390,68 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         cursor = conn.cursor()
                         row = self._find_product(cursor, p_id)
-                        actual_id = row[0] if row else p_id
+                        actual_id = str(row[0]) if row else str(p_id)
+                        p_code = str(row[1]) if row else str(p_id)
                         p_name = row[2] if row else p_id
                         
-                        cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, actual_id))
+                        cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, p_code))
+                        if cursor.rowcount == 0:
+                            cursor.execute("DELETE FROM products WHERE id=? OR code=? OR name=?", (p_id, p_id, p_name))
+                        cursor.execute("DELETE FROM movements WHERE product_id=? OR product_code=?", (actual_id, p_code))
                         commit_and_sync(conn)
                     finally:
                         conn.close()
 
-                add_audit_log('المدير العام', 'GENERAL_MANAGER', 'حذف صنف', f"تم حذف الصنف ({p_name}) نهائياً من قاعدة البيانات", 'WARNING')
-                return self._send_json({"success": True, "message": "تم حذف الصنف بنجاح"})
+                add_audit_log('المدير العام', 'GENERAL_MANAGER', 'حذف صنف', f"تم حذف الصنف [{p_code}] {p_name} نهائياً", 'WARNING')
+                return self._send_json({"success": True, "message": "تم حذف الصنف من المخزن نهائياً"})
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
-        return self._send_json({"success": False}, 404)
+        return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
 
-    def log_message(self, format, *args):
-        pass
+# -------------------------------------------------------------
+# 4. HTTP Server Runner on Thread with Strict Event Sync
+# -------------------------------------------------------------
+SERVER_READY = threading.Event()
+SERVER_PORT = [0]
+SERVER_ERROR = [None]
 
-class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-    """خادم HTTP متعدد الخيوط يتيح المعالجة المتزامنة دون تجميد الواجهة أو حدوث Database Lock"""
-    allow_reuse_address = True
-    daemon_threads = True
+def start_local_server():
+    """تشغيل خادم الويب المحلي الصامت لنقل الواجهة والـ API بربط فوري آمن ومنع تضارب المنافذ"""
+    global SERVER_PORT, SERVER_ERROR
+    try:
+        class ThreadedTCPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
 
-def start_local_server(port):
-    """تشغيل خادم محلي خفي متعدد الخيوط ومحمي من القفل في الخلفية"""
-    httpd = ThreadedHTTPServer(("127.0.0.1", port), SPAHTTPRequestHandler)
-    httpd.serve_forever()
+        # ربط الخادم مباشرة على منفذ حر موثوق ديناميكياً لتجنب التعارض
+        httpd = ThreadedTCPServer(('127.0.0.1', 0), SPAHTTPRequestHandler)
+        actual_port = httpd.server_address[1]
+        SERVER_PORT[0] = actual_port
+        SERVER_READY.set()
+        print(f"Local Server running on http://127.0.0.1:{actual_port}")
+        httpd.serve_forever()
+    except Exception as e:
+        SERVER_ERROR[0] = str(e)
+        SERVER_READY.set()
+        print(f"Error starting local server: {e}")
 
-# --- 4. NATIVE PYSIDE6 MAIN APPLICATION WINDOW CLASS & GPU FLICKER FIX ---
-# إيقاف التسريع البرمجي لـ GPU لمنع ارتجاف وتداخل النوافذ المنبثقة (Modal & Dialog Flickering Fix)
-os.environ["QT_WEBENGINE_DISABLE_GPU"] = "1"
-os.environ["QT_QUICK_BACKEND"] = "software"
-os.environ["QSG_RENDER_LOOP"] = "basic"
-
+# -------------------------------------------------------------
+# 5. Native Qt GUI Window (QWebEngineView + Native Direct Printing)
+# -------------------------------------------------------------
 try:
-    from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog, QDialog
+    from PySide6.QtCore import Qt, QUrl, QTimer
+    from PySide6.QtGui import QKeySequence, QShortcut
+    from PySide6.QtWidgets import QMainWindow, QMessageBox, QFileDialog, QDialog
+    from PySide6.QtPrintSupport import QPrinter, QPrintDialog
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWebEngineCore import QWebEngineSettings, QWebEngineProfile
-    from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
-    from PySide6.QtGui import QKeySequence, QShortcut, QIcon
-    from PySide6.QtCore import QUrl, Qt
 
     class NasserMainWindow(QMainWindow):
         def __init__(self, app_url):
             super().__init__()
             self.app_url = app_url
+            self.retry_count = 0
             self.setWindowTitle("شركة NASSER - نظام إدارة المخازن والمبيعات وإصدار الفواتير")
             self.resize(1366, 850)
             
@@ -1311,29 +1478,52 @@ try:
             settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
             settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, True)
             
-            # ربط إشارة الطباعة الداخلية الخاصة بـ QWebEnginePage
+            # معالجة إعادة المحاولة التلقائية في حال استغراق المحرك وقتاً لبدء الخادم
+            self.web_view.loadFinished.connect(self.on_load_finished)
+
+            # ربط اختصارات التحديث السريع F5 و Ctrl+R
+            self.shortcut_f5 = QShortcut(QKeySequence("F5"), self)
+            self.shortcut_f5.activated.connect(lambda: self.web_view.reload())
+            self.shortcut_ctrl_r = QShortcut(QKeySequence("Ctrl+R"), self)
+            self.shortcut_ctrl_r.activated.connect(lambda: self.web_view.reload())
+
+            # ربط إشارة الطباعة الداخلية الخاصة بـ QWebEnginePage (window.print())
             self.web_view.page().printRequested.connect(self.print_function)
             
-            # ربط اختصار لوحة المفاتيح الصريح Ctrl + P داخل نافذة التطبيق
+            # ربط اختصار لوحة المفاتيح الصريح Ctrl + P بنطاق ApplicationShortcut لضمان عمله في كل الحالات
             self.shortcut_print = QShortcut(QKeySequence("Ctrl+P"), self)
+            try:
+                self.shortcut_print.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            except Exception:
+                try:
+                    self.shortcut_print.setContext(Qt.ApplicationShortcut)
+                except Exception:
+                    pass
             self.shortcut_print.activated.connect(self.print_function)
             
             # تحميل الواجهة عبر الرابط المحلي للخادم الداخلي
             self.web_view.setUrl(QUrl(self.app_url))
             self.setCentralWidget(self.web_view)
 
+        def on_load_finished(self, ok):
+            """إعادة محاولة الاتصال التلقائي الصامت في حال تأخر جاهزية الخادم"""
+            if not ok and self.retry_count < 8:
+                self.retry_count += 1
+                QTimer.singleShot(1000, lambda: self.web_view.setUrl(QUrl(self.app_url)))
+
         def print_function(self):
             """
-            دالة الطباعة الأصلية 100% (Native Qt Printing)
-            تأخذ محتوى الـ QWebEngineView وتمرره مباشرة إلى QPrinter لإظهار حوار طباعة ويندوز
+            دالة الطباعة الأصلية الداخلية 100% (Native Internal Qt Printing)
+            تعتمد كلياً وحصرياً على محرك الطباعة الداخلي للنظام وإظهار حوار خيارات الطباعة الأصلي،
+            ولا تفتح أو تعتمد على أي برامج خارجية كـ Word أو قارئات PDF خارجية إطلاقاً.
             """
             try:
                 printer = QPrinter(QPrinter.PrinterMode.HighResolution)
                 printer.setFullPage(True)
                 
-                # فتح حوار طباعة ويندوز الأصلي مباشرة مع تثبيت الأب والنمطية لمنع أي ارتجاف
+                # فتح حوار خيارات الطباعة الأصلي الداخلي (Native Print Dialog)
                 print_dialog = QPrintDialog(printer, self)
-                print_dialog.setWindowTitle("طباعة الفاتورة - شركة ناصر")
+                print_dialog.setWindowTitle("خيارات الطباعة الداخلية - شركة ناصر")
                 print_dialog.setAttribute(Qt.WA_NativeWindow, True)
                 print_dialog.setWindowModality(Qt.ApplicationModal)
                 
@@ -1341,9 +1531,9 @@ try:
                     self.web_view.page().print(printer, lambda success: None)
             except Exception as pe:
                 print("Native Print Error:", pe)
-                # بديل مباشر لحفظ المستند كملف PDF إذا لم تكن هناك طابعة فيزيائية معرفة
+                # في حال عدم وجود طابعة فيزيائية معرفة، حفظ المستند داخلياً كملف PDF
                 try:
-                    save_dialog = QFileDialog(self, "حفظ الفاتورة كملف PDF", os.path.expanduser("~/Desktop/Invoice.pdf"), "PDF Files (*.pdf)")
+                    save_dialog = QFileDialog(self, "حفظ المستند كملف PDF داخلي", os.path.expanduser("~/Desktop/Invoice.pdf"), "PDF Files (*.pdf)")
                     save_dialog.setAttribute(Qt.WA_NativeWindow, True)
                     save_dialog.setWindowModality(Qt.ApplicationModal)
                     save_dialog.setAcceptMode(QFileDialog.AcceptSave)
@@ -1365,7 +1555,7 @@ try:
                     err_msg.setAttribute(Qt.WA_NativeWindow, True)
                     err_msg.setWindowModality(Qt.ApplicationModal)
                     err_msg.setWindowTitle("تنبيه الطباعة")
-                    err_msg.setText(f"تعذر الاتصال بالطابعة:\n{pe}")
+                    err_msg.setText(f"تعذر إتمام عملية الطباعة الداخلية:\n{pe}")
                     err_msg.setIcon(QMessageBox.Warning)
                     err_msg.exec()
 
@@ -1376,13 +1566,19 @@ def main():
     # 1. تهيئة قاعدة بيانات SQLite الدائمة في AppData عند التشغيل
     init_sqlite_db()
 
-    port = find_free_port()
-    
-    # 2. تشغيل خادم التطبيق المحلي في خيط منفصل (Background Thread)
-    server_thread = threading.Thread(target=start_local_server, args=(port,), daemon=True)
+    # 2. تشغيل خادم التطبيق المحلي في خيط منفصل (Background Thread) والانتظار حتى يصبح جاهزاً تماماً
+    server_thread = threading.Thread(target=start_local_server, daemon=True)
     server_thread.start()
     
-    app_url = f"http://127.0.0.1:{port}"
+    # انتظار مزامنة بدء الخادم لضمان عدم ظهور ERR_EMPTY_RESPONSE
+    SERVER_READY.wait(timeout=10)
+    actual_port = SERVER_PORT[0]
+    
+    if actual_port == 0:
+        print("CRITICAL: Failed to bind local server")
+        sys.exit(1)
+
+    app_url = f"http://127.0.0.1:{actual_port}"
 
     # 3. تشغيل نافذة تطبيق PySide6 الأصلية مع ضبط إعدادات التوافق وإلغاء التسريع البرمجي للـ GPU
     try:
