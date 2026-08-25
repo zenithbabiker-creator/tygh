@@ -70,12 +70,20 @@ export default function App() {
 
   const [products, setProducts] = useState<Product[]>(() => {
     try {
-      const saved = localStorage.getItem('nasser_warehouse_products_v4');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 20 && !parsed.some((p: Product) => p.name?.includes('ماكينة إعداد القهوة'))) {
-          return parsed;
-        }
+      const savedV5 = localStorage.getItem('nasser_warehouse_products_v5');
+      if (savedV5) {
+        const parsed = JSON.parse(savedV5);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      const savedV4 = localStorage.getItem('nasser_warehouse_products_v4');
+      if (savedV4) {
+        const parsed = JSON.parse(savedV4);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      const savedV3 = localStorage.getItem('nasser_warehouse_products_v3');
+      if (savedV3) {
+        const parsed = JSON.parse(savedV3);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {
       // Fallback
@@ -85,8 +93,13 @@ export default function App() {
 
   const [movements, setMovements] = useState<StockMovement[]>(() => {
     try {
-      const saved = localStorage.getItem('nasser_warehouse_movements_v2');
-      return saved ? JSON.parse(saved) : [];
+      const savedV5 = localStorage.getItem('nasser_warehouse_movements_v5');
+      if (savedV5) return JSON.parse(savedV5);
+      const savedV2 = localStorage.getItem('nasser_warehouse_movements_v2');
+      if (savedV2) return JSON.parse(savedV2);
+      const savedV1 = localStorage.getItem('nasser_warehouse_movements_v1');
+      if (savedV1) return JSON.parse(savedV1);
+      return [];
     } catch {
       return [];
     }
@@ -110,12 +123,12 @@ export default function App() {
         }));
         setProducts(normalized);
         try {
-          localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(normalized));
+          localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(normalized));
         } catch (e) {
           console.warn('Failed saving to localStorage', e);
         }
       } else {
-        const saved = localStorage.getItem('nasser_warehouse_products_v4');
+        const saved = localStorage.getItem('nasser_warehouse_products_v5') || localStorage.getItem('nasser_warehouse_products_v4');
         if (saved) {
           const parsed = JSON.parse(saved);
           const normalized = parsed.map((p: Product) => ({
@@ -126,7 +139,7 @@ export default function App() {
         }
       }
     } catch (e) {
-      const saved = localStorage.getItem('nasser_warehouse_products_v4');
+      const saved = localStorage.getItem('nasser_warehouse_products_v5') || localStorage.getItem('nasser_warehouse_products_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
         const normalized = parsed.map((p: Product) => ({
@@ -144,16 +157,16 @@ export default function App() {
       if (res.isJson && res.data && res.data.success && Array.isArray(res.data.movements)) {
         setMovements(res.data.movements);
         try {
-          localStorage.setItem('nasser_warehouse_movements_v2', JSON.stringify(res.data.movements));
+          localStorage.setItem('nasser_warehouse_movements_v5', JSON.stringify(res.data.movements));
         } catch (e) {
           console.warn('Failed saving to localStorage', e);
         }
       } else {
-        const saved = localStorage.getItem('nasser_warehouse_movements_v2');
+        const saved = localStorage.getItem('nasser_warehouse_movements_v5') || localStorage.getItem('nasser_warehouse_movements_v2');
         if (saved) setMovements(JSON.parse(saved));
       }
     } catch (e) {
-      const saved = localStorage.getItem('nasser_warehouse_movements_v2');
+      const saved = localStorage.getItem('nasser_warehouse_movements_v5') || localStorage.getItem('nasser_warehouse_movements_v2');
       if (saved) setMovements(JSON.parse(saved));
     }
   };
@@ -185,6 +198,24 @@ export default function App() {
     fetchMovements();
     fetchUsers();
     fetchLogs();
+  }, []);
+
+  // Global Ctrl+P & Cmd+P Keyboard Shortcut Listener for Internal Native Printing
+  useEffect(() => {
+    const handleGlobalPrint = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        try {
+          window.focus();
+          window.print();
+        } catch (err) {
+          console.error('Global internal print trigger error:', err);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalPrint, true);
+    return () => window.removeEventListener('keydown', handleGlobalPrint, true);
   }, []);
 
   // Handle Login
@@ -309,13 +340,13 @@ export default function App() {
 
     setProducts(prev => {
       const updated = prev.map(p => (p.id === targetProduct.id ? { ...p, stock: newStock } : p));
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
       return updated;
     });
 
     setMovements(prev => {
       const updated = [newMovement, ...prev];
-      localStorage.setItem('nasser_warehouse_movements_v1', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_movements_v5', JSON.stringify(updated));
       return updated;
     });
 
@@ -392,11 +423,11 @@ export default function App() {
     }
 
     setProducts(updatedProducts);
-    localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updatedProducts));
+    localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updatedProducts));
 
     setMovements(prev => {
       const updated = [...createdMovements, ...prev];
-      localStorage.setItem('nasser_warehouse_movements_v1', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_movements_v5', JSON.stringify(updated));
       return updated;
     });
 
@@ -445,7 +476,7 @@ export default function App() {
 
     setProducts(prev => {
       const updated = [newProd, ...prev];
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
       return updated;
     });
 
@@ -513,7 +544,7 @@ export default function App() {
 
     setProducts(prev => {
       const updated = [...newProds, ...prev];
-      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
       return updated;
     });
 
@@ -549,7 +580,7 @@ export default function App() {
 
     setProducts(prev => {
       const updated = prev.map(p => (p.id === id || p.code === id) ? { ...p, ...productData } : p);
-      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
       return updated;
     });
 
@@ -578,7 +609,7 @@ export default function App() {
 
     setProducts(prev => {
       const updated = prev.filter(p => p.id !== id && p.code !== id);
-      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
       return updated;
     });
 
@@ -640,9 +671,9 @@ export default function App() {
             </div>
             <h1 className="text-2xl font-black tracking-wide text-white font-['Tajawal'] flex items-center justify-center gap-2">
               <span>شركة <span className="text-blue-400">NASSER</span></span>
-              <span className="text-[11px] font-mono bg-blue-600/30 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">v2.0.0</span>
+              <span className="text-[11px] font-mono bg-blue-600/30 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">v2.0.5</span>
             </h1>
-            <p className="text-xs text-slate-300 font-bold">نظام إدارة المخازن والمخزون والتوريد والتصريف - الإصدار الثاني (v2.0.0)</p>
+            <p className="text-xs text-slate-300 font-bold">نظام إدارة المخازن والمخزون والتوريد والتصريف - الإصدار (v2.0.5)</p>
           </div>
 
           {/* Error Banner */}
@@ -753,7 +784,7 @@ export default function App() {
           {/* Footer Info */}
           <div className="pt-4 border-t border-slate-800 text-center text-[10px] text-slate-400 flex items-center justify-between">
             <span>شركة NASSER - نظام إدارة المخازن 100% Offline</span>
-            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v2.1.0</span>
+            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v2.0.5</span>
           </div>
 
         </div>
@@ -787,7 +818,7 @@ export default function App() {
                   شركة <span className="text-blue-400">NASSER</span>
                 </h1>
                 <span className="text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 px-1.5 py-0.2 rounded-md">
-                  v2.1.0
+                  v2.0.5
                 </span>
               </div>
               <p className="text-[10px] text-blue-400 mt-0.5 font-bold tracking-widest uppercase">

@@ -34,7 +34,7 @@ export const DesktopAppTab: React.FC = () => {
             <Monitor className="w-6 h-6 text-blue-400" />
             <h3 className="text-xl font-extrabold font-['Tajawal'] flex items-center gap-2">
               <span>تطبيق سطح المكتب المباشر لنظام الويندوز (Windows .exe)</span>
-              <span className="text-xs font-mono font-bold bg-blue-500/30 text-blue-300 border border-blue-400/40 px-2 py-0.5 rounded-full">v2.1.0</span>
+              <span className="text-xs font-mono font-bold bg-blue-500/30 text-blue-300 border border-blue-400/40 px-2 py-0.5 rounded-full">v2.0.5</span>
             </h3>
           </div>
           <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">

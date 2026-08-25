@@ -62,10 +62,29 @@ interface AuditLog {
   type: 'INFO' | 'WARNING' | 'SECURITY' | 'MOVEMENT';
 }
 
+interface SaleRecord {
+  id: string;
+  invoiceNumber: string;
+  deliveryOrderRef?: string;
+  createdAt: string;
+  customerName?: string;
+  customerPhone?: string;
+  cashierId?: string;
+  cashierName: string;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  paymentMethod: string;
+  items: any[];
+  notes?: string;
+}
+
 interface DBData {
   users: User[];
   products: Product[];
   movements: StockMovement[];
+  sales?: SaleRecord[];
   logs: AuditLog[];
   settings: {
     googleSheetUrl: string;
@@ -1059,6 +1078,53 @@ app.post('/api/movements/batch', (req, res) => {
 app.get('/api/movements', (req, res) => {
   const db = readDB();
   res.json({ success: true, movements: db.movements });
+});
+
+// SALES INVOICES - List
+app.get('/api/sales', (req, res) => {
+  const db = readDB();
+  res.json({ success: true, sales: db.sales || [] });
+});
+
+// SALES INVOICES - Create Sale Record
+app.post('/api/sales', (req, res) => {
+  const { customerName, customerPhone, cashierId, cashierName, subtotal, discount, tax, total, paymentMethod, items, notes, invoiceNumber } = req.body;
+  const db = readDB();
+  if (!db.sales) db.sales = [];
+
+  const count = db.sales.length + 1;
+  const invNum = invoiceNumber || `INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(count).padStart(4, '0')}`;
+
+  const newSale: SaleRecord = {
+    id: `sale_${Date.now()}`,
+    invoiceNumber: invNum,
+    deliveryOrderRef: invNum,
+    createdAt: new Date().toISOString(),
+    customerName: customerName || '',
+    customerPhone: customerPhone || '',
+    cashierId: cashierId || 'usr_1',
+    cashierName: cashierName || 'أمين المخزن',
+    subtotal: Number(subtotal) || 0,
+    discount: Number(discount) || 0,
+    tax: Number(tax) || 0,
+    total: Number(total) || 0,
+    paymentMethod: paymentMethod || 'CASH',
+    items: items || [],
+    notes: notes || '',
+  };
+
+  db.sales.unshift(newSale);
+  writeDB(db);
+
+  addAuditLog(
+    newSale.cashierName,
+    'WAREHOUSE_MANAGER',
+    'تسجيل فاتورة مبيعات',
+    `تم تسجيل فاتورة مبيعات رقم [${invNum}] بمبلغ إجمالي ${newSale.total}`,
+    'MOVEMENT'
+  );
+
+  res.json({ success: true, invoiceNumber: invNum, sale: newSale });
 });
 
 // USERS - List

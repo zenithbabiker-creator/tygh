@@ -351,6 +351,43 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
+  // Explicit Global Keyboard Shortcut (Ctrl + P / Cmd + P) in Inventory View
+  useEffect(() => {
+    const handleInventoryPrintShortcut = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // If invoice delivery preview modal is already open, let DeliveryOrderModal handle it
+        if (activeDeliveryItems && activeDeliveryItems.length > 0) {
+          window.focus();
+          window.print();
+          return;
+        }
+
+        // If items are present in invoice cart, complete and issue the invoice immediately
+        if (cartItems.length > 0) {
+          if (!recipientName.trim()) {
+            setRecipientName('عميل نقدي / مبيعات مباشرة');
+          }
+          handleCompleteInvoice();
+          return;
+        }
+
+        // Otherwise, invoke internal printing for the current inventory view directly
+        try {
+          window.focus();
+          window.print();
+        } catch (err) {
+          console.error('Internal inventory print error:', err);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleInventoryPrintShortcut, true);
+    return () => window.removeEventListener('keydown', handleInventoryPrintShortcut, true);
+  }, [cartItems, recipientName, activeDeliveryItems, products]);
+
   // Automated Next Sequential Code Generator (NASSER-101, NASSER-102... or NASSER-1001...)
   const generateNextCode = (currentList: Product[] = products): string => {
     let maxNum = 100;

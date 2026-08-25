@@ -29,7 +29,7 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
 }) => {
   const isOpen = Boolean(movement || (items && items.length > 0));
 
-  // Recipient info resolution
+  // Recipient info resolution with automatic fallback
   const rawRecipient =
     recipientName ||
     recipientEntity ||
@@ -40,39 +40,35 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
       : '') ||
     movement?.operatorName ||
     '';
-  const recipientInfo = rawRecipient && rawRecipient !== '..........................' ? rawRecipient.trim() : '';
+  const recipientInfo = (rawRecipient && rawRecipient !== '..........................' && rawRecipient.trim())
+    ? rawRecipient.trim()
+    : 'عميل نقدي / استلام مباشر';
   const hasValidRecipient = Boolean(recipientInfo && recipientInfo.length > 0);
 
+  // Internal Native Print Function (Window Print / Native Qt Print Dialog)
   const handlePrint = () => {
-    if (!hasValidRecipient) {
-      alert('تنبيه هام: لن يتم تفعيل الطباعة إلا بعد التأكد من تعبئة اسم المستلم / العميل.');
-      return;
-    }
     try {
       window.focus();
       window.print();
     } catch (e) {
-      console.error('Print trigger error:', e);
+      console.error('Internal Print trigger error:', e);
     }
   };
 
-  // Keyboard shortcut Ctrl + P handler
+  // Explicit Global Keyboard Shortcut (Ctrl + P / Cmd + P) for Instant Internal Printing
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault();
-        if (!hasValidRecipient) {
-          alert('تنبيه هام: لن يتم تفعيل الطباعة واختصار (Ctrl + P) إلا بعد التأكد من تعبئة اسم المستلم / العميل.');
-          return;
-        }
+        e.stopPropagation();
         handlePrint();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, hasValidRecipient]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

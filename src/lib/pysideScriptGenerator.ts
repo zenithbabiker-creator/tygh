@@ -11,9 +11,9 @@ export function generatePySideScript(): string {
 شركة NASSER - نظام إدارة المخازن والمبيعات وإصدار الفواتير
 تطبيق سطح المكتب الاحترافي لشركة ناصر (PySide6 Native Desktop App)
 - حل مشكلة المسارات والشاشة البيضاء عبر sys._MEIPASS و get_resource_path
-- قاعدة بيانات SQLite ديناميكية دائمة تحفظ البيانات أوفلاين مدى الحياة مع دعم الأسعار
+- قاعدة بيانات SQLite ديناميكية دائمة تحفظ البيانات أوفلاين مدى الحياة في AppData
 - معالجة تامة لأخطاء Database Lock عبر Thread Locks & SQLite WAL & busy_timeout
-- دعم مسار /api/movements/batch لتسجيل الفواتير في عملية ذرية واحدة وحساب الإجماليات
+- دعم مسار /api/movements/batch و /api/sales لتسجيل الفواتير في عملية ذرية واحدة
 - طباعة داخلية أصلية 100% عبر PySide6.QtPrintSupport (QPrinter, QPrintDialog)
 - التقاط فوري لاختصار لوحة المفاتيح (Ctrl + P) لطباعة الفاتورة مباشرة
 ====================================================================
@@ -79,9 +79,9 @@ def get_html_file_path():
 def get_app_dir():
     """
     الحصول على المجلد الدائم المستقر لقاعدة البيانات على القرص الصلب.
-    الأولوية لمجلد Roaming AppData ومجلد المستخدم الدائم لضمان عدم مسح البيانات أبداً بواسطة أدوات تنظيف القرص أو الملفات المؤقتة.
+    الأولوية لمجلد Roaming AppData ومجلد المستخدم الدائم لضمان عدم مسح البيانات أبداً.
     """
-    # 1. Roaming AppData (أعلى مستوى أمان وثبات في ويندوز، لا يمسحه تنظيف القرص Disk Cleanup إطلاقاً)
+    # 1. Roaming AppData (أعلى مستوى أمان وثبات في ويندوز، لا يمسحه تنظيف القرص إطلاقاً)
     roaming = os.environ.get('APPDATA')
     if roaming and os.path.isdir(roaming):
         app_dir = os.path.join(roaming, 'NasserCompanyApp')
@@ -104,7 +104,7 @@ def get_app_dir():
 def get_db_path():
     """
     تحديد المسار الفعلي الدائم لقاعدة بيانات SQLite مع حماية تامة للبيانات السابقة.
-    يتحقق من وجود قاعدة بيانات سابقة في أي مسار دائم لمنع إنشاء ملف جديد فارغ وتجنب ضياع البيانات التراكمية.
+    يتحقق من وجود قاعدة بيانات سابقة في أي مسار دائم لمنع إنشاء ملف جديد فارغ وتجنب ضياع البيانات.
     """
     candidates = []
 
@@ -113,7 +113,7 @@ def get_db_path():
     if roaming:
         candidates.append(os.path.join(roaming, 'NasserCompanyApp', 'nasser_store.db'))
 
-    # 2. مسار مجلد Local AppData (لضمان قراءة واستئناف أي بيانات حُفظت مسبقاً)
+    # 2. مسار مجلد Local AppData
     local_app = os.environ.get('LOCALAPPDATA')
     if local_app:
         candidates.append(os.path.join(local_app, 'NasserCompanyApp', 'nasser_store.db'))
@@ -139,7 +139,7 @@ def get_db_path():
 
 def get_db_connection():
     """
-    إنشاء اتصال آمن بقاعدة البيانات مع تفعيل نمط WAL وتأمين الحفظ اللحظي على القرص الصلب (Auto-Commit & Full Sync).
+    إنشاء اتصال آمن بقاعدة البيانات مع تفعيل نمط WAL وتأمين الحفظ اللحظي على القرص الصلب.
     تفعيل مهلة انتظار 60 ثانية لمنع حدوث Database Lock وضمان إتمام المعاملات فورياً.
     """
     db_path = get_db_path()
@@ -152,8 +152,7 @@ def get_db_connection():
 
 def commit_and_sync(conn):
     """
-    تنفيذ الحفظ النهائي اللحظي وإغلاق المعاملة ودفع البيانات مباشرة للقرص الصلب (Hard Drive/SSD)
-    مما يضمن عدم بقاء أي تعديلات معلقة بالذاكرة المؤقتة (RAM) في حال إغلاق التطبيق أو انقطاع الطاقة.
+    تنفيذ الحفظ النهائي اللحظي وإغلاق المعاملة ودفع البيانات مباشرة للقرص الصلب.
     """
     try:
         conn.commit()
@@ -248,7 +247,7 @@ def init_sqlite_db():
                 )
             ''')
             
-            # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) لحل أي خطأ بالأعمدة القديمة ---
+            # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) ---
             def ensure_columns(table_name, columns_to_check):
                 try:
                     cursor.execute(f"PRAGMA table_info({table_name})")
@@ -262,7 +261,6 @@ def init_sqlite_db():
                 except Exception as e:
                     print(f"Schema check error on {table_name}:", e)
 
-            # ترقية جدول حركات المخزون للتأكد من وجود الأعمدة بالكامل
             ensure_columns('movements', [
                 ('reference_no', 'TEXT DEFAULT ""'),
                 ('product_id', 'TEXT DEFAULT ""'),
@@ -277,7 +275,6 @@ def init_sqlite_db():
                 ('created_at', 'TEXT DEFAULT ""')
             ])
 
-            # ترقية جدول المنتجات
             ensure_columns('products', [
                 ('code', 'TEXT DEFAULT ""'),
                 ('name', 'TEXT DEFAULT ""'),
@@ -290,7 +287,6 @@ def init_sqlite_db():
                 ('updated_at', 'TEXT DEFAULT ""')
             ])
 
-            # ترقية جدول المبيعات
             ensure_columns('sales', [
                 ('invoice_number', 'TEXT DEFAULT ""'),
                 ('created_at', 'TEXT DEFAULT ""'),
@@ -307,136 +303,124 @@ def init_sqlite_db():
                 ('notes', 'TEXT DEFAULT ""')
             ])
 
-            # --- فحص ومسح القائمة الافتراضية القديمة نهائياً وزرع البيانات الرسمية الجديدة (82 صنف) ---
-            cursor.execute("SELECT COUNT(*) FROM products WHERE name LIKE '%ماكينة إعداد القهوة%' OR name LIKE '%طاحونة حبوب القهوة%' OR name LIKE '%طابعة فواتير حرارية%' OR name LIKE '%فلتر تنقية%' OR name LIKE '%مقبض ضغط القهوة%' OR name LIKE '%ميزان إلكتروني ديجيتال%'")
-            has_old_demo = cursor.fetchone()[0] > 0
-
+            # --- فحص وإدخال البيانات الرسمية (82 صنف) فقط إذا كانت قاعدة البيانات فارغة تماماً ---
             cursor.execute("SELECT COUNT(*) FROM products")
             total_prods = cursor.fetchone()[0]
 
-            if has_old_demo or total_prods == 0:
-                print("🔄 SQLite Migration: Dropping old demo products and inserting 82 official seed items...")
-                cursor.execute("DELETE FROM products WHERE name LIKE '%ماكينة إعداد القهوة%' OR name LIKE '%طاحونة حبوب القهوة%' OR name LIKE '%طابعة فواتير حرارية%' OR name LIKE '%فلتر تنقية%' OR name LIKE '%مقبض ضغط القهوة%' OR name LIKE '%ميزان إلكتروني ديجيتال%' OR (code LIKE 'NASSER-10%' AND (id='prd_1' OR id='prd_2' OR id='prd_3' OR id='prd_4' OR id='prd_5' OR id='prd_6'))")
-                
-                cursor.execute("SELECT COUNT(*) FROM products")
-                if cursor.fetchone()[0] == 0:
-                    try:
-                        cursor.execute("DELETE FROM sqlite_sequence WHERE name='products'")
-                    except Exception:
-                        pass
-                    
-                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                    official_seed_groups = [
-                        ("سوق 21 أجهزة بركانية", [
-                            "شواية لحم",
-                            "ثلاجة حلويات",
-                            "ماكينة شاورما كهرباء",
-                            "مضارب",
-                            "آيس ميكر"
-                        ]),
-                        ("عام", [
-                            "طاولة السندوتش",
-                            "صواني قرص",
-                            "ميزان ساعة",
-                            "شواية مشكل",
-                            "حوضات",
-                            "ديسبنسر",
-                            "صحن السندوتش",
-                            "كرتونة زجاج",
-                            "شيخ الشواية",
-                            "فرامة أكياس + أخشاب",
-                            "شاورما دجاج",
-                            "غلاية لتر",
-                            "مبرد عصير",
-                            "منشر لحوم",
-                            "غلاية لتر كهرباء",
-                            "شواية عرض السندوتش",
-                            "بسكيت سمك",
-                            "شواية فراخ",
-                            "كرتونة صواني",
-                            "غلاية غاز",
-                            "قاطع سيخ شتراك صغير",
-                            "عصارة برتقال"
-                        ]),
-                        ("الأجهزة", [
-                            "طاولة السندوتش",
-                            "طباخة 2 شعلة فول",
-                            "م. السندوتش مرضى",
-                            "ماكينة بطاطس",
-                            "مبرد غاز",
-                            "فريزر هاير جديد",
-                            "ماكينة سمك",
-                            "شواية فراخ دوار",
-                            "غلاية لتر كهرباء",
-                            "ماكينة بروست ضغط",
-                            "صندل في مكان نائي يصعب الوصول إليه"
-                        ]),
-                        ("المخزن الشروق", [
-                            "شوايه فحم",
-                            "شاورما دبل",
-                            "غلايه غاز",
-                            "سخانات بروست أحمر",
-                            "فرن طبقة غاز",
-                            "مضرب نابوليتان",
-                            "بوفيه",
-                            "قلاب لحوم",
-                            "مسخنات بروست",
-                            "توستر",
-                            "كرتونه تقطيع بطاطس",
-                            "كرتونه ثلج",
-                            "قلايه 2 عين غاز",
-                            "وافل مدور + مربع",
-                            "ايس ميكر كيلو",
-                            "منشار لحمه",
-                            "كسارة ثلج",
-                            "ماكينه كاشير",
-                            "بروست",
-                            "فرن طابق",
-                            "شوايه لحم",
-                            "غلايه كهرباء لتر"
-                        ]),
-                        ("مخزن العمدة غرب", [
-                            "حوض عين",
-                            "راس شاورما",
-                            "ثلاجة حلويات",
-                            "شواية فحم",
-                            "ثلاجة عرض السندوتش",
-                            "مفرمة",
-                            "سخان بروست",
-                            "كابتشينو",
-                            "خلاط لتر",
-                            "سخانة منزلية",
-                            "مسن بروست",
-                            "مفرمة لحم",
-                            "خلاط لتر ك",
-                            "كسارة ثلج",
-                            "كبسة دبل مفرد",
-                            "قلاية مفرد غاز",
-                            "كبس سمك",
-                            "سخان ماء بويلر",
-                            "ماكينة تتبيل بروست",
-                            "كرتونة صحون",
-                            "وافل مربع",
-                            "فرن مدور"
-                        ])
-                    ]
+            if total_prods == 0:
+                print("🔄 SQLite Initialization: Inserting 82 official seed items...")
+                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                official_seed_groups = [
+                    ("سوق 21 أجهزة بركانية", [
+                        "شواية لحم",
+                        "ثلاجة حلويات",
+                        "ماكينة شاورما كهرباء",
+                        "مضارب",
+                        "آيس ميكر"
+                    ]),
+                    ("عام", [
+                        "طاولة السندوتش",
+                        "صواني قرص",
+                        "ميزان ساعة",
+                        "شواية مشكل",
+                        "حوضات",
+                        "ديسبنسر",
+                        "صحن السندوتش",
+                        "كرتونة زجاج",
+                        "شيخ الشواية",
+                        "فرامة أكياس + أخشاب",
+                        "شاورما دجاج",
+                        "غلاية لتر",
+                        "مبرد عصير",
+                        "منشر لحوم",
+                        "غلاية لتر كهرباء",
+                        "شواية عرض السندوتش",
+                        "بسكيت سمك",
+                        "شواية فراخ",
+                        "كرتونة صواني",
+                        "غلاية غاز",
+                        "قاطع سيخ شتراك صغير",
+                        "عصارة برتقال"
+                    ]),
+                    ("الأجهزة", [
+                        "طاولة السندوتش",
+                        "طباخة 2 شعلة فول",
+                        "م. السندوتش مرضى",
+                        "ماكينة بطاطس",
+                        "مبرد غاز",
+                        "فريزر هاير جديد",
+                        "ماكينة سمك",
+                        "شواية فراخ دوار",
+                        "غلاية لتر كهرباء",
+                        "ماكينة بروست ضغط",
+                        "صندل في مكان نائي يصعب الوصول إليه"
+                    ]),
+                    ("المخزن الشروق", [
+                        "شوايه فحم",
+                        "شاورما دبل",
+                        "غلايه غاز",
+                        "سخانات بروست أحمر",
+                        "فرن طبقة غاز",
+                        "مضرب نابوليتان",
+                        "بوفيه",
+                        "قلاب لحوم",
+                        "مسخنات بروست",
+                        "توستر",
+                        "كرتونه تقطيع بطاطس",
+                        "كرتونه ثلج",
+                        "قلايه 2 عين غاز",
+                        "وافل مدور + مربع",
+                        "ايس ميكر كيلو",
+                        "منشار لحمه",
+                        "كسارة ثلج",
+                        "ماكينه كاشير",
+                        "بروست",
+                        "فرن طابق",
+                        "شوايه لحم",
+                        "غلايه كهرباء لتر"
+                    ]),
+                    ("مخزن العمدة غرب", [
+                        "حوض عين",
+                        "راس شاورما",
+                        "ثلاجة حلويات",
+                        "شواية فحم",
+                        "ثلاجة عرض السندوتش",
+                        "مفرمة",
+                        "سخان بروست",
+                        "كابتشينو",
+                        "خلاط لتر",
+                        "سخانة منزلية",
+                        "مسن بروست",
+                        "مفرمة لحم",
+                        "خلاط لتر ك",
+                        "كسارة ثلج",
+                        "كبسة دبل مفرد",
+                        "قلاية مفرد غاز",
+                        "كبس سمك",
+                        "سخان ماء بويلر",
+                        "ماكينة تتبيل بروست",
+                        "كرتونة صحون",
+                        "وافل مربع",
+                        "فرن مدور"
+                    ])
+                ]
 
-                    seq_counter = 1
-                    for grp_cat, grp_items in official_seed_groups:
-                        for grp_name in grp_items:
-                            p_code = f"NASSER-{100 + seq_counter}"
-                            cursor.execute('''
-                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
-                            
-                            row_id = cursor.lastrowid
-                            m_id = f"mvt_init_{row_id}"
-                            cursor.execute('''
-                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (m_id, 'OPENING-INIT', str(row_id), p_code, grp_name.strip(), 'IN', 10, 0, 10, 'رصيد افتتاحي رسمي مسجل بالمستودع', 'المدير العام', now_iso))
-                            seq_counter += 1
+                seq_counter = 1
+                for grp_cat, grp_items in official_seed_groups:
+                    for grp_name in grp_items:
+                        p_code = f"NASSER-{100 + seq_counter}"
+                        cursor.execute('''
+                            INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
+                        
+                        row_id = cursor.lastrowid
+                        m_id = f"mvt_init_{row_id}"
+                        cursor.execute('''
+                            INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (m_id, 'OPENING-INIT', str(row_id), p_code, grp_name.strip(), 'IN', 10, 0, 10, 'رصيد افتتاحي رسمي مسجل بالمستودع', 'المدير العام', now_iso))
+                        seq_counter += 1
 
             # تعبئة حسابات المستخدمين إذا كانت فارغة
             cursor.execute("SELECT COUNT(*) FROM users")
@@ -450,24 +434,6 @@ def init_sqlite_db():
                     "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     ('usr_2', 'wh_manager', 'wh123', 'أمين المخزن الرئيسي - أحمد مصطفى', 'WAREHOUSE_MANAGER', 'warehouse.nasser@gmail.com', now_iso)
                 )
-
-            # 6. Database Migration Routine: Ensure all products and movements strictly follow 'NASSER-' prefix
-            try:
-                cursor.execute("SELECT id, code FROM products")
-                all_prods = cursor.fetchall()
-                migrated_cnt = 0
-                for r in all_prods:
-                    r_id, r_code = str(r[0]), str(r[1] or '')
-                    if not r_code.startswith('NASSER-'):
-                        clean_num = re.sub(r'\\D', '', r_code) or r_id
-                        new_code = f"NASSER-{clean_num}"
-                        cursor.execute("UPDATE products SET code=? WHERE id=?", (new_code, r_id))
-                        cursor.execute("UPDATE movements SET product_code=? WHERE product_id=? OR product_code=?", (new_code, r_id, r_code))
-                        migrated_cnt += 1
-                if migrated_cnt > 0:
-                    print(f"SQLite Migration: Standardized {migrated_cnt} products to NASSER- prefix.")
-            except Exception as mig_err:
-                print("SQLite code migration note:", mig_err)
 
             commit_and_sync(conn)
         finally:
@@ -642,7 +608,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "customerName": r[3] or "", "customerPhone": r[4] or "",
                     "cashierId": r[5] or "", "cashierName": r[6],
                     "subtotal": r[7], "discount": r[8], "tax": r[9], "total": r[10],
-                    "paymentMethod": r[11], "items": json.loads(r[12]), "notes": r[13] or ""
+                    "paymentMethod": r[11], "items": json.loads(r[12]) if r[12] else [], "notes": r[13] or ""
                 } for r in rows]
                 return self._send_json({"success": True, "sales": sales})
             except Exception as e:
@@ -1071,11 +1037,11 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "timestamp": now_iso
                 }
                 add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'حركة مخزنية', f"{m_type} - {p_name} ({qty}) - الرصيد الجديد: {new_stock}", 'MOVEMENT')
-                return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات الدائمة SQLite بنجاح"})
+                return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات بنجاح"})
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
-        # 8.2 BATCH MOVEMENTS ENDPOINT (Atomic Invoice Processing - Solves Database Lock)
+        # 9. BATCH MOVEMENTS ENDPOINT (Atomic Invoice Processing - Solves Database Lock)
         if parsed_path == '/api/movements/batch':
             try:
                 data = self._read_json_body()
@@ -1163,92 +1129,43 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
-        # 9. Add Sale Invoice
+        # 10. Add Sale Invoice Record
         if parsed_path == '/api/sales':
             try:
                 data = self._read_json_body()
                 items = data.get('items', [])
+                customer_name = data.get('customerName', '').strip()
+                customer_phone = data.get('customerPhone', '').strip()
+                cashier_name = data.get('cashierName', 'مسؤول المبيعات').strip()
+                cashier_id = data.get('cashierId', 'usr_1')
+                subtotal = float(data.get('subtotal', 0.0))
+                discount = float(data.get('discount', 0.0))
+                tax = float(data.get('tax', 0.0))
+                total = float(data.get('total', subtotal - discount + tax))
+                payment_method = data.get('paymentMethod', 'CASH')
+                notes = data.get('notes', '')
+                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
                 
                 with DB_LOCK:
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
-                        
                         cursor.execute("SELECT COUNT(*) FROM sales")
                         count = cursor.fetchone()[0] + 1
-                        invoice_num = f"INV-{time.strftime('%Y%m')}-{count:04d}"
-                        
+                        invoice_num = data.get('invoiceNumber') or f"INV-{time.strftime('%Y%m')}-{count:04d}"
                         sale_id = f"sale_{int(time.time()*1000)}"
-                        created_at = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                        
+
                         cursor.execute('''
                             INSERT INTO sales (id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (
-                            sale_id, invoice_num, created_at,
-                            data.get('customerName', 'عميل نقدي'),
-                            data.get('customerPhone', ''),
-                            data.get('cashierId', 'usr_1'),
-                            data.get('cashierName', 'الكاشير'),
-                            data.get('subtotal', 0),
-                            data.get('discount', 0),
-                            data.get('tax', 0),
-                            data.get('total', 0),
-                            data.get('paymentMethod', 'CASH'),
-                            json.dumps(items, ensure_ascii=False),
-                            data.get('notes', '')
-                        ))
-                        
-                        for itm in items:
-                            p_code = itm.get('productCode')
-                            p_id = itm.get('productId')
-                            try:
-                                qty = int(itm.get('quantity', 1))
-                            except Exception:
-                                qty = 1
-                            
-                            p_row = self._find_product(cursor, p_code or p_id)
-                            if p_row:
-                                cursor.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?", (qty, p_row[0]))
-                        
-                        commit_and_sync(conn)
-                    finally:
-                        conn.close()
-                
-                new_sale = {
-                    "id": sale_id, "invoiceNumber": invoice_num, "deliveryOrderRef": invoice_num, "createdAt": created_at,
-                    "customerName": data.get('customerName', 'عميل نقدي'),
-                    "customerPhone": data.get('customerPhone', ''),
-                    "cashierId": data.get('cashierId', 'usr_1'),
-                    "cashierName": data.get('cashierName', 'الكاشير'),
-                    "subtotal": data.get('subtotal', 0), "discount": data.get('discount', 0),
-                    "tax": data.get('tax', 0), "total": data.get('total', 0),
-                    "paymentMethod": data.get('paymentMethod', 'CASH'),
-                    "items": items, "notes": data.get('notes', '')
-                }
-                return self._send_json({"success": True, "sale": new_sale, "message": "تم حفظ الفاتورة بنجاح في قاعدة البيانات المحلية"})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
+                        ''', (sale_id, invoice_num, now_iso, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, json.dumps(items, ensure_ascii=False), notes))
 
-        # 10. Add User
-        if parsed_path == '/api/users':
-            try:
-                data = self._read_json_body()
-                u_id = f"usr_{int(time.time()*1000)}"
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            INSERT INTO users (id, username, password, name, role, gmail, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ''', (u_id, data.get('username'), data.get('password', '123456'), data.get('name'), data.get('role', 'WAREHOUSE_MANAGER'), data.get('gmail', ''), now_iso))
                         commit_and_sync(conn)
                     finally:
                         conn.close()
 
-                return self._send_json({"success": True, "user": {"id": u_id, "username": data.get('username'), "name": data.get('name'), "role": data.get('role'), "gmail": data.get('gmail')}})
+                add_audit_log(cashier_name, 'WAREHOUSE_MANAGER', 'تسجيل فاتورة', f"تم تسجيل فاتورة مبيعات رقم [{invoice_num}] بقيمة {total}", 'MOVEMENT')
+                return self._send_json({"success": True, "invoiceNumber": invoice_num, "message": "تم حفظ الفاتورة بنجاح"})
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
@@ -1266,8 +1183,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
-                        
-                        # Resilient product lookup
                         row = self._find_product(cursor, p_id)
                         if not row and data.get('code'):
                             row = self._find_product(cursor, data.get('code'))
@@ -1331,7 +1246,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
-        return self._send_json({"success": False}, 404)
+        return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
 
     def do_DELETE(self):
         parsed_path = self.path.split('?')[0]
@@ -1355,39 +1270,39 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     finally:
                         conn.close()
 
-                add_audit_log('المدير العام', 'GENERAL_MANAGER', 'حذف صنف', f"تم حذف الصنف ({p_name}) نهائياً من قاعدة البيانات", 'WARNING')
-                return self._send_json({"success": True, "message": "تم حذف الصنف بنجاح"})
+                add_audit_log('المدير العام', 'GENERAL_MANAGER', 'حذف صنف', f"تم حذف الصنف [{p_code}] {p_name} نهائياً", 'WARNING')
+                return self._send_json({"success": True, "message": "تم حذف الصنف من المخزن نهائياً"})
             except Exception as e:
                 return self._send_json({"success": False, "message": str(e)}, 500)
 
-        return self._send_json({"success": False}, 404)
+        return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
 
-    def log_message(self, format, *args):
-        pass
-
-class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-    """خادم HTTP متعدد الخيوط يتيح المعالجة المتزامنة دون تجميد الواجهة أو حدوث Database Lock"""
-    allow_reuse_address = True
-    daemon_threads = True
-
+# -------------------------------------------------------------
+# 4. HTTP Server Runner on Thread
+# -------------------------------------------------------------
 def start_local_server(port):
-    """تشغيل خادم محلي خفي متعدد الخيوط ومحمي من القفل في الخلفية"""
-    httpd = ThreadedHTTPServer(("127.0.0.1", port), SPAHTTPRequestHandler)
-    httpd.serve_forever()
+    """تشغيل خادم الويب المحلي الصامت لنقل الواجهة والـ API"""
+    try:
+        class ThreadedTCPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
 
-# --- 4. NATIVE PYSIDE6 MAIN APPLICATION WINDOW CLASS & GPU FLICKER FIX ---
-# إيقاف التسريع البرمجي لـ GPU لمنع ارتجاف وتداخل النوافذ المنبثقة (Modal & Dialog Flickering Fix)
-os.environ["QT_WEBENGINE_DISABLE_GPU"] = "1"
-os.environ["QT_QUICK_BACKEND"] = "software"
-os.environ["QSG_RENDER_LOOP"] = "basic"
+        with ThreadedTCPServer(('127.0.0.1', port), SPAHTTPRequestHandler) as httpd:
+            print(f"Local Server running on http://127.0.0.1:{port}")
+            httpd.serve_forever()
+    except Exception as e:
+        print(f"Error starting local server on port {port}: {e}")
 
+# -------------------------------------------------------------
+# 5. Native Qt GUI Window (QWebEngineView + Native Direct Printing)
+# -------------------------------------------------------------
 try:
-    from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog, QDialog
+    from PySide6.QtCore import Qt, QUrl
+    from PySide6.QtGui import QKeySequence, QShortcut
+    from PySide6.QtWidgets import QMainWindow, QMessageBox, QFileDialog, QDialog
+    from PySide6.QtPrintSupport import QPrinter, QPrintDialog
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWebEngineCore import QWebEngineSettings, QWebEngineProfile
-    from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
-    from PySide6.QtGui import QKeySequence, QShortcut, QIcon
-    from PySide6.QtCore import QUrl, Qt
 
     class NasserMainWindow(QMainWindow):
         def __init__(self, app_url):
@@ -1419,11 +1334,18 @@ try:
             settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
             settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, True)
             
-            # ربط إشارة الطباعة الداخلية الخاصة بـ QWebEnginePage
+            # ربط إشارة الطباعة الداخلية الخاصة بـ QWebEnginePage (window.print())
             self.web_view.page().printRequested.connect(self.print_function)
             
-            # ربط اختصار لوحة المفاتيح الصريح Ctrl + P داخل نافذة التطبيق
+            # ربط اختصار لوحة المفاتيح الصريح Ctrl + P بنطاق ApplicationShortcut لضمان عمله في كل الحالات
             self.shortcut_print = QShortcut(QKeySequence("Ctrl+P"), self)
+            try:
+                self.shortcut_print.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            except Exception:
+                try:
+                    self.shortcut_print.setContext(Qt.ApplicationShortcut)
+                except Exception:
+                    pass
             self.shortcut_print.activated.connect(self.print_function)
             
             # تحميل الواجهة عبر الرابط المحلي للخادم الداخلي
@@ -1432,16 +1354,17 @@ try:
 
         def print_function(self):
             """
-            دالة الطباعة الأصلية 100% (Native Qt Printing)
-            تأخذ محتوى الـ QWebEngineView وتمرره مباشرة إلى QPrinter لإظهار حوار طباعة ويندوز
+            دالة الطباعة الأصلية الداخلية 100% (Native Internal Qt Printing)
+            تعتمد كلياً وحصرياً على محرك الطباعة الداخلي للنظام وإظهار حوار خيارات الطباعة الأصلي،
+            ولا تفتح أو تعتمد على أي برامج خارجية كـ Word أو قارئات PDF خارجية إطلاقاً.
             """
             try:
                 printer = QPrinter(QPrinter.PrinterMode.HighResolution)
                 printer.setFullPage(True)
                 
-                # فتح حوار طباعة ويندوز الأصلي مباشرة مع تثبيت الأب والنمطية لمنع أي ارتجاف
+                # فتح حوار خيارات الطباعة الأصلي الداخلي (Native Print Dialog)
                 print_dialog = QPrintDialog(printer, self)
-                print_dialog.setWindowTitle("طباعة الفاتورة - شركة ناصر")
+                print_dialog.setWindowTitle("خيارات الطباعة الداخلية - شركة ناصر")
                 print_dialog.setAttribute(Qt.WA_NativeWindow, True)
                 print_dialog.setWindowModality(Qt.ApplicationModal)
                 
@@ -1449,9 +1372,9 @@ try:
                     self.web_view.page().print(printer, lambda success: None)
             except Exception as pe:
                 print("Native Print Error:", pe)
-                # بديل مباشر لحفظ المستند كملف PDF إذا لم تكن هناك طابعة فيزيائية معرفة
+                # في حال عدم وجود طابعة فيزيائية معرفة، حفظ المستند داخلياً كملف PDF
                 try:
-                    save_dialog = QFileDialog(self, "حفظ الفاتورة كملف PDF", os.path.expanduser("~/Desktop/Invoice.pdf"), "PDF Files (*.pdf)")
+                    save_dialog = QFileDialog(self, "حفظ المستند كملف PDF داخلي", os.path.expanduser("~/Desktop/Invoice.pdf"), "PDF Files (*.pdf)")
                     save_dialog.setAttribute(Qt.WA_NativeWindow, True)
                     save_dialog.setWindowModality(Qt.ApplicationModal)
                     save_dialog.setAcceptMode(QFileDialog.AcceptSave)
@@ -1473,7 +1396,7 @@ try:
                     err_msg.setAttribute(Qt.WA_NativeWindow, True)
                     err_msg.setWindowModality(Qt.ApplicationModal)
                     err_msg.setWindowTitle("تنبيه الطباعة")
-                    err_msg.setText(f"تعذر الاتصال بالطابعة:\\n{pe}")
+                    err_msg.setText(f"تعذر إتمام عملية الطباعة الداخلية:\\n{pe}")
                     err_msg.setIcon(QMessageBox.Warning)
                     err_msg.exec()
 

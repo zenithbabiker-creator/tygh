@@ -81,7 +81,7 @@ jobs:
           [Setup]
           AppId={{8B84180A-24E0-4828-A4FB-B780EC82D884}
           AppName=شركة ناصر - إدارة المخازن والمبيعات
-          AppVersion=1.0.1
+          AppVersion=2.0.5
           AppPublisher=محمد بابكر
           AppPublisherURL=https://nasser-company.com
           AppSupportURL=https://nasser-company.com
@@ -93,7 +93,7 @@ jobs:
           Compression=lzma2
           SolidCompression=yes
           OutputDir=installer_output
-          OutputBaseFilename=Nasser_Company_Setup_v1.0.1
+          OutputBaseFilename=Nasser_Company_Setup_v2.0.5
           SetupIconFile=assets\icon.ico
           ArchitecturesInstallIn64BitMode=x64compatible
           DisableProgramGroupPage=yes
