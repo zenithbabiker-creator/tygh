@@ -36,7 +36,10 @@ import mimetypes
 # حماية تامة ضد أخطاء NoneType في وضع --noconsole في بيئة ويندوز (حل مشكلة ERR_EMPTY_RESPONSE)
 class SafeNullWriter:
     def write(self, *args, **kwargs): pass
+    def writelines(self, *args, **kwargs): pass
     def flush(self, *args, **kwargs): pass
+    def isatty(self): return False
+    def fileno(self): return -1
 
 if sys.stdout is None:
     sys.stdout = SafeNullWriter()
@@ -79,7 +82,8 @@ def get_dist_path():
         return sys._MEIPASS
 
     # 3. البحث بجانب ملف السكريبت أو ملف الـ EXE وفي مجلد _internal الخاص بـ PyInstaller
-    exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    current_script_or_exe = sys.executable if getattr(sys, 'frozen', False) else (globals().get('__file__') or sys.executable or os.path.abspath('.'))
+    exe_dir = os.path.dirname(os.path.abspath(current_script_or_exe))
     candidates = [
         os.path.join(exe_dir, "_internal", "dist"),
         os.path.join(exe_dir, "_internal"),
@@ -143,7 +147,8 @@ def get_db_path():
         candidates.append(os.path.join(local_app, 'NasserCompanyApp', 'nasser_store.db'))
 
     # 3. مسار بجانب ملف الـ EXE (إذا كان متاحاً وقابلاً للكتابة)
-    exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    current_script_or_exe = sys.executable if getattr(sys, 'frozen', False) else (globals().get('__file__') or sys.executable or os.path.abspath('.'))
+    exe_dir = os.path.dirname(os.path.abspath(current_script_or_exe))
     local_side_db = os.path.join(exe_dir, 'nasser_store.db')
     if os.path.exists(local_side_db) and os.access(exe_dir, os.W_OK) and ("Program Files" not in exe_dir):
         return local_side_db
@@ -790,8 +795,8 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception as e:
                     return self._send_json({"success": False, "error": str(e)}, 500)
 
-            # 5. API GET Logs
-            if parsed_path == '/api/logs':
+            # 5. API GET Logs & Audit Logs
+            if parsed_path in ['/api/logs', '/api/audit-logs']:
                 try:
                     with DB_LOCK:
                         conn = get_db_connection()
@@ -806,7 +811,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         "id": r[0], "timestamp": r[1], "username": r[2],
                         "role": r[3], "action": r[4], "details": r[5], "type": r[6]
                     } for r in rows]
-                    return self._send_json({"success": True, "logs": logs})
+                    return self._send_json({"success": True, "logs": logs, "auditLogs": logs})
                 except Exception as e:
                     return self._send_json({"success": False, "error": str(e)}, 500)
 
@@ -835,586 +840,604 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 pass
 
     def do_POST(self):
-        parsed_path = self.path.split('?')[0]
+        try:
+            parsed_path = self.path.split('?')[0].split('#')[0]
 
-        # 1. User Authentication (Login)
-        if parsed_path == '/api/auth/login':
-            try:
+            # 1. User Authentication (Login)
+            if parsed_path == '/api/auth/login':
+                try:
+                    data = self._read_json_body()
+                    username = data.get('username', '').strip()
+                    password = data.get('password', '').strip()
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT id, username, name, role, gmail FROM users WHERE LOWER(username)=LOWER(?) AND password=?", (username, password))
+                            row = cursor.fetchone()
+                        finally:
+                            conn.close()
+
+                    if row:
+                        user = {"id": row[0], "username": row[1], "name": row[2], "role": row[3], "gmail": row[4]}
+                        add_audit_log(user['username'], user['role'], 'تسجيل دخول', f"تم تسجيل الدخول بنجاح للمستخدم {user['name']}", 'INFO')
+                        return self._send_json({"success": True, "user": user, "message": "تم تسجيل الدخول بنجاح"})
+                    else:
+                        return self._send_json({"success": False, "message": "اسم المستخدم أو كلمة المرور غير صحيحة"}, 401)
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
+
+            # 2. Forgot Password OTP
+            if parsed_path == '/api/auth/forgot-password':
                 data = self._read_json_body()
                 username = data.get('username', '').strip()
-                password = data.get('password', '').strip()
                 with DB_LOCK:
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
-                        cursor.execute("SELECT id, username, name, role, gmail FROM users WHERE LOWER(username)=LOWER(?) AND password=?", (username, password))
+                        cursor.execute("SELECT username, gmail, role FROM users WHERE LOWER(username)=LOWER(?)", (username,))
                         row = cursor.fetchone()
                     finally:
                         conn.close()
 
-                if row:
-                    user = {"id": row[0], "username": row[1], "name": row[2], "role": row[3], "gmail": row[4]}
-                    add_audit_log(user['username'], user['role'], 'تسجيل دخول', f"تم تسجيل الدخول بنجاح للمستخدم {user['name']}", 'INFO')
-                    return self._send_json({"success": True, "user": user, "message": "تم تسجيل الدخول بنجاح"})
-                else:
-                    return self._send_json({"success": False, "message": "اسم المستخدم أو كلمة المرور غير صحيحة"}, 401)
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
+                if not row:
+                    return self._send_json({"success": False, "message": "اسم المستخدم غير موجود بالنظام"}, 404)
+                
+                otp_code = str(int(100000 + time.time() % 900000))
+                ACTIVE_OTPS[username.lower()] = {
+                    "code": otp_code,
+                    "expires_at": time.time() + 600,
+                    "gmail": row[1]
+                }
+                add_audit_log(row[0], row[2], 'طلب إرسال OTP', f"تم إنشاء رمز استعادة كلمة السر لـ {row[1]}", 'SECURITY')
+                return self._send_json({
+                    "success": True,
+                    "message": f"تم إرسال رمز OTP المكون من 6 أرقام إلى بريدك ({row[1]})",
+                    "gmail": row[1],
+                    "demoOtpCode": otp_code
+                })
 
-        # 2. Forgot Password OTP
-        if parsed_path == '/api/auth/forgot-password':
-            data = self._read_json_body()
-            username = data.get('username', '').strip()
-            with DB_LOCK:
-                conn = get_db_connection()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT username, gmail, role FROM users WHERE LOWER(username)=LOWER(?)", (username,))
-                    row = cursor.fetchone()
-                finally:
-                    conn.close()
-
-            if not row:
-                return self._send_json({"success": False, "message": "اسم المستخدم غير موجود بالنظام"}, 404)
-            
-            otp_code = str(int(100000 + time.time() % 900000))
-            ACTIVE_OTPS[username.lower()] = {
-                "code": otp_code,
-                "expires_at": time.time() + 600,
-                "gmail": row[1]
-            }
-            add_audit_log(row[0], row[2], 'طلب إرسال OTP', f"تم إنشاء رمز استعادة كلمة السر لـ {row[1]}", 'SECURITY')
-            return self._send_json({
-                "success": True,
-                "message": f"تم إرسال رمز OTP المكون من 6 أرقام إلى بريدك ({row[1]})",
-                "gmail": row[1],
-                "demoOtpCode": otp_code
-            })
-
-        # 3. Verify OTP
-        if parsed_path == '/api/auth/verify-otp':
-            data = self._read_json_body()
-            username = data.get('username', '').strip().lower()
-            otp_code = data.get('otpCode', '').strip()
-            rec = ACTIVE_OTPS.get(username)
-            if not rec or time.time() > rec['expires_at']:
-                return self._send_json({"success": False, "message": "رمز OTP منتهي الصلاحية أو غير موجود"}, 400)
-            if rec['code'] != otp_code:
-                return self._send_json({"success": False, "message": "رمز OTP غير صحيح"}, 400)
-            return self._send_json({"success": True, "message": "تم التحقق من الرمز بنجاح"})
-
-        # 4. Reset Password with OTP
-        if parsed_path == '/api/auth/reset-password':
-            data = self._read_json_body()
-            username = data.get('username', '').strip().lower()
-            otp_code = data.get('otpCode', '').strip()
-            new_password = data.get('newPassword', '').strip()
-            rec = ACTIVE_OTPS.get(username)
-            if not rec or rec['code'] != otp_code:
-                return self._send_json({"success": False, "message": "رمز التحقق غير صالح"}, 400)
-            
-            with DB_LOCK:
-                conn = get_db_connection()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE users SET password=? WHERE LOWER(username)=LOWER(?)", (new_password, username))
-                    commit_and_sync(conn)
-                finally:
-                    conn.close()
-
-            ACTIVE_OTPS.pop(username, None)
-            add_audit_log(username, 'GENERAL_MANAGER', 'تغيير كلمة السر', 'تم تغيير كلمة السر بنجاح عبر رمز OTP', 'SECURITY')
-            return self._send_json({"success": True, "message": "تم تحديث كلمة السر بنجاح"})
-
-        # 5. Reset Password Offline with Old Password
-        if parsed_path == '/api/auth/reset-password-offline':
-            data = self._read_json_body()
-            username = data.get('username', '').strip()
-            old_pass = data.get('oldPassword', '').strip()
-            new_pass = data.get('newPassword', '').strip()
-            with DB_LOCK:
-                conn = get_db_connection()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM users WHERE LOWER(username)=LOWER(?) AND password=?", (username, old_pass))
-                    row = cursor.fetchone()
-                    if not row:
-                        return self._send_json({"success": False, "message": "كلمة السر الحالية غير صحيحة"}, 400)
-                    cursor.execute("UPDATE users SET password=? WHERE id=?", (new_pass, row[0]))
-                    commit_and_sync(conn)
-                finally:
-                    conn.close()
-
-            add_audit_log(username, 'USER', 'تغيير كلمة السر', 'تم التحقق من كلمة السر القديمة وتحديث كلمة السر بنجاح', 'SECURITY')
-            return self._send_json({"success": True, "message": "تم تحديث كلمة السر بنجاح"})
-
-        # 6. Add Single Product
-        if parsed_path == '/api/products':
-            try:
+            # 3. Verify OTP
+            if parsed_path == '/api/auth/verify-otp':
                 data = self._read_json_body()
-                name = (data.get('name') or 'صنف جديد').strip()
-                category = data.get('category') or 'عام'
-                unit = data.get('unit') or 'وحدة'
-                desc = data.get('description') or ''
-                stock_val = max(0, int(data.get('stock') or 0))
-                price_val = max(0.0, float(data.get('price') or 0.0))
-                min_stock = max(1, int(data.get('minStock') or 5))
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                username = data.get('username', '').strip().lower()
+                otp_code = data.get('otpCode', '').strip()
+                rec = ACTIVE_OTPS.get(username)
+                if not rec or time.time() > rec['expires_at']:
+                    return self._send_json({"success": False, "message": "رمز OTP منتهي الصلاحية أو غير موجود"}, 400)
+                if rec['code'] != otp_code:
+                    return self._send_json({"success": False, "message": "رمز OTP غير صحيح"}, 400)
+                return self._send_json({"success": True, "message": "تم التحقق من الرمز بنجاح"})
+
+            # 4. Reset Password with OTP
+            if parsed_path == '/api/auth/reset-password':
+                data = self._read_json_body()
+                username = data.get('username', '').strip().lower()
+                otp_code = data.get('otpCode', '').strip()
+                new_password = data.get('newPassword', '').strip()
+                rec = ACTIVE_OTPS.get(username)
+                if not rec or rec['code'] != otp_code:
+                    return self._send_json({"success": False, "message": "رمز التحقق غير صالح"}, 400)
                 
                 with DB_LOCK:
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
-                        
-                        # Auto code generation with strict NASSER- formatting
-                        code = (data.get('code') or '').strip()
-                        cursor.execute("SELECT id, code FROM products")
-                        all_prods = cursor.fetchall()
-                        max_num = 100
-                        for c in all_prods:
-                            m = re.findall(r'[0-9]+', str(c[1]))
-                            if m:
-                                max_num = max(max_num, int(m[-1]))
-                            try:
-                                max_num = max(max_num, int(c[0]))
-                            except Exception:
-                                pass
-
-                        if not code:
-                            code = f"NASSER-{max_num + 1}"
-                        elif not code.upper().startswith('NASSER-'):
-                            code = f"NASSER-{code}"
-                        
-                        # Handle unique constraint collision
-                        cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (code,))
-                        if cursor.fetchone()[0] > 0:
-                            code = f"NASSER-{max_num + 1}_{int(time.time()) % 100}"
-
-                        # Insert using SQLite native AUTOINCREMENT for primary key
-                        cursor.execute('''
-                            INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (code, name, category, stock_val, min_stock, unit, price_val, desc, now_iso))
-                        
-                        new_id = str(cursor.lastrowid)
-
-                        # Opening stock movement if stock > 0
-                        if stock_val > 0:
-                            mov_id = f"mvt_{int(time.time()*1000)}_{new_id}"
-                            cursor.execute('''
-                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (mov_id, 'OPENING-BAL', new_id, code, name, 'IN', stock_val, 0, stock_val, 'رصيد افتتاحي عند إنشاء الصنف', data.get('username') or 'المدير العام', now_iso))
-
+                        cursor.execute("UPDATE users SET password=? WHERE LOWER(username)=LOWER(?)", (new_password, username))
                         commit_and_sync(conn)
                     finally:
                         conn.close()
 
-                new_product = {
-                    "id": new_id, "code": code, "name": name, "category": category,
-                    "stock": stock_val, "minStock": min_stock, "unit": unit, "price": price_val,
-                    "description": desc, "updatedAt": now_iso
-                }
-                add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'إضافة صنف جديد', f"تم تسجيل الصنف ({name}) بكود [{code}] ورصيد {stock_val} بسعر {price_val}", 'MOVEMENT')
-                return self._send_json({"success": True, "product": new_product, "message": "تم إضافة الصنف بنجاح وحفظه فوراً في قاعدة البيانات"})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
+                ACTIVE_OTPS.pop(username, None)
+                add_audit_log(username, 'GENERAL_MANAGER', 'تغيير كلمة السر', 'تم تغيير كلمة السر بنجاح عبر رمز OTP', 'SECURITY')
+                return self._send_json({"success": True, "message": "تم تحديث كلمة السر بنجاح"})
 
-        # 7. Batch Add Products (Excel Multi-paste & Bulk insert)
-        if parsed_path == '/api/products/batch':
-            try:
+            # 5. Reset Password Offline with Old Password
+            if parsed_path == '/api/auth/reset-password-offline':
                 data = self._read_json_body()
-                items = data.get('items', [])
-                if not items:
-                    return self._send_json({"success": False, "message": "لا توجد أصناف للإضافة"}, 400)
-
-                created_products = []
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-
+                username = data.get('username', '').strip()
+                old_pass = data.get('oldPassword', '').strip()
+                new_pass = data.get('newPassword', '').strip()
                 with DB_LOCK:
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
-                        
-                        # Baseline numeric code
-                        cursor.execute("SELECT code FROM products")
-                        all_codes = cursor.fetchall()
-                        max_num = 100
-                        for c in all_codes:
-                            m = re.findall(r'[0-9]+', str(c[0]))
-                            if m:
-                                max_num = max(max_num, int(m[-1]))
+                        cursor.execute("SELECT id FROM users WHERE LOWER(username)=LOWER(?) AND password=?", (username, old_pass))
+                        row = cursor.fetchone()
+                        if not row:
+                            return self._send_json({"success": False, "message": "كلمة السر الحالية غير صحيحة"}, 400)
+                        cursor.execute("UPDATE users SET password=? WHERE id=?", (new_pass, row[0]))
+                        commit_and_sync(conn)
+                    finally:
+                        conn.close()
 
-                        for idx, itm in enumerate(items):
-                            p_name = (itm.get('name') or '').strip()
-                            if not p_name:
-                                continue
-                            max_num += 1
-                            raw_code = (itm.get('code') or '').strip()
+                add_audit_log(username, 'USER', 'تغيير كلمة السر', 'تم التحقق من كلمة السر القديمة وتحديث كلمة السر بنجاح', 'SECURITY')
+                return self._send_json({"success": True, "message": "تم تحديث كلمة السر بنجاح"})
+
+            # 6. Add Single Product
+            if parsed_path == '/api/products':
+                try:
+                    data = self._read_json_body()
+                    name = (data.get('name') or 'صنف جديد').strip()
+                    category = data.get('category') or 'عام'
+                    unit = data.get('unit') or 'وحدة'
+                    desc = data.get('description') or ''
+                    stock_val = max(0, int(data.get('stock') or 0))
+                    price_val = max(0.0, float(data.get('price') or 0.0))
+                    min_stock = max(1, int(data.get('minStock') or 5))
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            
+                            # Auto code generation with strict NASSER- formatting
+                            code = (data.get('code') or '').strip()
+                            cursor.execute("SELECT id, code FROM products")
+                            all_prods = cursor.fetchall()
+                            max_num = 100
+                            for c in all_prods:
+                                m = re.findall(r'[0-9]+', str(c[1]))
+                                if m:
+                                    max_num = max(max_num, int(m[-1]))
+                                try:
+                                    max_num = max(max_num, int(c[0]))
+                                except Exception:
+                                    pass
+
+                            if not code:
+                                code = f"NASSER-{max_num + 1}"
+                            elif not code.upper().startswith('NASSER-'):
+                                code = f"NASSER-{code}"
+                            
+                            # Handle unique constraint collision
+                            cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (code,))
+                            if cursor.fetchone()[0] > 0:
+                                code = f"NASSER-{max_num + 1}_{int(time.time()) % 100}"
+
+                            # Insert using SQLite native AUTOINCREMENT for primary key
+                            cursor.execute('''
+                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (code, name, category, stock_val, min_stock, unit, price_val, desc, now_iso))
+                            
+                            new_id = str(cursor.lastrowid)
+
+                            # Opening stock movement if stock > 0
+                            if stock_val > 0:
+                                mov_id = f"mvt_{int(time.time()*1000)}_{new_id}"
+                                cursor.execute('''
+                                    INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (mov_id, 'OPENING-BAL', new_id, code, name, 'IN', stock_val, 0, stock_val, 'رصيد افتتاحي عند إنشاء الصنف', data.get('username') or 'المدير العام', now_iso))
+
+                            commit_and_sync(conn)
+                        finally:
+                            conn.close()
+
+                    new_product = {
+                        "id": new_id, "code": code, "name": name, "category": category,
+                        "stock": stock_val, "minStock": min_stock, "unit": unit, "price": price_val,
+                        "description": desc, "updatedAt": now_iso
+                    }
+                    add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'إضافة صنف جديد', f"تم تسجيل الصنف ({name}) بكود [{code}] ورصيد {stock_val} بسعر {price_val}", 'MOVEMENT')
+                    return self._send_json({"success": True, "product": new_product, "message": "تم إضافة الصنف بنجاح وحفظه فوراً في قاعدة البيانات"})
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
+
+            # 7. Batch Add Products (Excel Multi-paste & Bulk insert)
+            if parsed_path == '/api/products/batch':
+                try:
+                    data = self._read_json_body()
+                    items = data.get('items', [])
+                    if not items:
+                        return self._send_json({"success": False, "message": "لا توجد أصناف للإضافة"}, 400)
+
+                    created_products = []
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            
+                            # Baseline numeric code
+                            cursor.execute("SELECT code FROM products")
+                            all_codes = cursor.fetchall()
+                            max_num = 100
+                            for c in all_codes:
+                                m = re.findall(r'[0-9]+', str(c[0]))
+                                if m:
+                                    max_num = max(max_num, int(m[-1]))
+
+                            for idx, itm in enumerate(items):
+                                p_name = (itm.get('name') or '').strip()
+                                if not p_name:
+                                    continue
+                                max_num += 1
+                                raw_code = (itm.get('code') or '').strip()
+                                if not raw_code:
+                                    p_code = f"NASSER-{max_num}"
+                                elif not raw_code.upper().startswith('NASSER-'):
+                                    p_code = f"NASSER-{raw_code}"
+                                else:
+                                    p_code = raw_code
+                                
+                                # Ensure code uniqueness
+                                cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (p_code,))
+                                if cursor.fetchone()[0] > 0:
+                                    p_code = f"{p_code}_{int(time.time()) % 1000}_{idx}"
+
+                                p_cat = itm.get('category') or 'عام'
+                                p_unit = itm.get('unit') or 'وحدة'
+                                p_desc = itm.get('description') or ''
+                                p_stock = max(0, int(itm.get('stock') or 0))
+                                p_price = max(0.0, float(itm.get('price') or 0.0))
+                                p_min = max(1, int(itm.get('minStock') or 5))
+
+                                cursor.execute('''
+                                    INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso))
+                                
+                                p_id = str(cursor.lastrowid)
+
+                                if p_stock > 0:
+                                    mov_id = f"mvt_{int(time.time()*1000)}_{p_id}"
+                                    cursor.execute('''
+                                        INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    ''', (mov_id, 'BATCH-OPENING', p_id, p_code, p_name, 'IN', p_stock, 0, p_stock, 'رصيد إدخال افتتاحي دفعة واحدة', data.get('username') or 'المدير العام', now_iso))
+
+                                created_products.append({
+                                    "id": p_id, "code": p_code, "name": p_name, "category": p_cat,
+                                    "stock": p_stock, "minStock": p_min, "unit": p_unit, "price": p_price,
+                                    "description": p_desc, "updatedAt": now_iso
+                                })
+
+                            commit_and_sync(conn)
+                        finally:
+                            conn.close()
+
+                    add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'إضافة أصناف دفعة واحدة', f"تم إضافة {len(created_products)} صنف بنجاح وحفظها نهائياً", 'MOVEMENT')
+                    return self._send_json({"success": True, "count": len(created_products), "products": created_products, "message": f"تم إضافة {len(created_products)} صنف بنجاح"})
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
+
+            # 8. Single Movement Endpoint (Stock In / Out / Adjustment)
+            if parsed_path == '/api/movements':
+                try:
+                    data = self._read_json_body()
+                    p_id_raw = str(data.get('productId') or data.get('productCode') or data.get('code') or data.get('productName') or data.get('name') or '').strip()
+                    m_type = data.get('type', 'OUT')
+                    ref_no = data.get('referenceNo', '')
+                    reason_str = data.get('reason', '')
+                    op_name = data.get('operatorName') or 'أمين المخزن'
+                    try:
+                        qty = int(data.get('quantity', 1))
+                    except Exception:
+                        qty = 1
+                    
+                    mov_id = f"mov_{int(time.time()*1000)}"
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+
+                            p_row = self._find_product(cursor, p_id_raw)
+                            if not p_row and data.get('productCode'):
+                                p_row = self._find_product(cursor, data.get('productCode'))
+                            if not p_row and data.get('productName'):
+                                p_row = self._find_product(cursor, data.get('productName'))
+                            
+                            actual_id = p_id_raw
+                            p_code = data.get('productCode') or ""
+                            p_name = data.get('productName') or "صنف مخزني"
+                            previous_stock = 0
+                            new_stock = 0
+
+                            if p_row:
+                                actual_id = str(p_row[0])
+                                p_code = p_row[1]
+                                p_name = p_row[2]
+                                previous_stock = int(p_row[3])
+                                
+                                if m_type == 'IN':
+                                    new_stock = previous_stock + qty
+                                elif m_type == 'OUT':
+                                    new_stock = max(0, previous_stock - qty)
+                                elif m_type == 'ADJUSTMENT':
+                                    new_stock = max(0, qty)
+                                else:
+                                    new_stock = previous_stock
+                                
+                                cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
+                            else:
+                                new_stock = max(0, qty)
+
+                            cursor.execute('''
+                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (mov_id, ref_no, actual_id, p_code, p_name, m_type, qty, previous_stock, new_stock, reason_str, op_name, now_iso))
+
+                            commit_and_sync(conn)
+                        finally:
+                            conn.close()
+
+                    movement_obj = {
+                        "id": mov_id,
+                        "productId": actual_id,
+                        "productCode": p_code,
+                        "productName": p_name,
+                        "type": m_type,
+                        "quantity": qty,
+                        "previousStock": previous_stock,
+                        "newStock": new_stock,
+                        "reason": reason_str,
+                        "referenceNo": ref_no,
+                        "operatorName": op_name,
+                        "timestamp": now_iso
+                    }
+                    add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'حركة مخزنية', f"{m_type} - {p_name} ({qty}) - الرصيد الجديد: {new_stock}", 'MOVEMENT')
+                    return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات بنجاح"})
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
+
+            # 9. BATCH MOVEMENTS ENDPOINT (Atomic Invoice Processing - Solves Database Lock)
+            if parsed_path == '/api/movements/batch':
+                try:
+                    data = self._read_json_body()
+                    items = data.get('items', [])
+                    ref_no = data.get('referenceNo', '1')
+                    reason_str = data.get('reason', 'فاتورة مبيعات')
+                    op_name = data.get('operatorName') or 'أمين المخزن'
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+                    if not items:
+                        return self._send_json({"success": False, "message": "لا توجد أصناف في الفاتورة"}, 400)
+
+                    created_movements = []
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+
+                            # مرحلة التحقق أولاً: التأكد من توفر الرصيد لجميع الأصناف
+                            for idx, itm in enumerate(items):
+                                p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
+                                try:
+                                    qty = max(1, int(itm.get('quantity', 1)))
+                                except Exception:
+                                    qty = 1
+                                
+                                p_row = self._find_product(cursor, p_id_key)
+                                if not p_row and itm.get('productCode'):
+                                    p_row = self._find_product(cursor, itm.get('productCode'))
+                                if not p_row and itm.get('productName'):
+                                    p_row = self._find_product(cursor, itm.get('productName'))
+
+                                if not p_row:
+                                    label = itm.get('productName') or itm.get('productCode') or p_id_key or f"بند {idx+1}"
+                                    return self._send_json({"success": False, "message": f"الصنف ({label}) غير موجود بالمخزن"}, 404)
+                                if int(p_row[3]) < qty:
+                                    return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {p_row[3]} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
+
+                            # مرحلة التنفيذ الذري: خصم الكميات وتسجيل الحركات دفعة واحدة
+                            for idx, itm in enumerate(items):
+                                p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
+                                try:
+                                    qty = max(1, int(itm.get('quantity', 1)))
+                                except Exception:
+                                    qty = 1
+
+                                p_row = self._find_product(cursor, p_id_key)
+                                if not p_row and itm.get('productCode'):
+                                    p_row = self._find_product(cursor, itm.get('productCode'))
+                                if not p_row and itm.get('productName'):
+                                    p_row = self._find_product(cursor, itm.get('productName'))
+
+                                actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3])
+                                new_stock = max(0, prev_stock - qty)
+
+                                cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
+
+                                mov_id = f"mov_{int(time.time()*1000)}_{idx}"
+                                cursor.execute('''
+                                    INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (mov_id, ref_no, actual_id, p_code, p_name, 'OUT', qty, prev_stock, new_stock, reason_str, op_name, now_iso))
+
+                                created_movements.append({
+                                    "id": mov_id,
+                                    "productId": actual_id,
+                                    "productCode": p_code,
+                                    "productName": p_name,
+                                    "type": "OUT",
+                                    "quantity": qty,
+                                    "previousStock": prev_stock,
+                                    "newStock": new_stock,
+                                    "reason": reason_str,
+                                    "referenceNo": ref_no,
+                                    "operatorName": op_name,
+                                    "timestamp": now_iso
+                                })
+
+                            commit_and_sync(conn)
+                        finally:
+                            conn.close()
+
+                    add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'صرف فاتورة مبيعات (دفعة واحدة)', f"تم صرف وتوثيق عدد ({len(created_movements)}) أصناف بموجب فاتورة رقم [{ref_no}] بنجاح", 'MOVEMENT')
+                    return self._send_json({"success": True, "movements": created_movements, "message": f"تم صرف وتوثيق الفاتورة رقم [{ref_no}] بنجاح"})
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
+
+            # 10. Add Sale Invoice Record
+            if parsed_path == '/api/sales':
+                try:
+                    data = self._read_json_body()
+                    items = data.get('items', [])
+                    customer_name = data.get('customerName', '').strip()
+                    customer_phone = data.get('customerPhone', '').strip()
+                    cashier_name = data.get('cashierName', 'مسؤول المبيعات').strip()
+                    cashier_id = data.get('cashierId', 'usr_1')
+                    subtotal = float(data.get('subtotal', 0.0))
+                    discount = float(data.get('discount', 0.0))
+                    tax = float(data.get('tax', 0.0))
+                    total = float(data.get('total', subtotal - discount + tax))
+                    payment_method = data.get('paymentMethod', 'CASH')
+                    notes = data.get('notes', '')
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT COUNT(*) FROM sales")
+                            count = cursor.fetchone()[0] + 1
+                            invoice_num = data.get('invoiceNumber') or f"INV-{time.strftime('%Y%m')}-{count:04d}"
+                            sale_id = f"sale_{int(time.time()*1000)}"
+
+                            cursor.execute('''
+                                INSERT INTO sales (id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (sale_id, invoice_num, now_iso, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, json.dumps(items, ensure_ascii=False), notes))
+
+                            commit_and_sync(conn)
+                        finally:
+                            conn.close()
+
+                    add_audit_log(cashier_name, 'WAREHOUSE_MANAGER', 'تسجيل فاتورة', f"تم تسجيل فاتورة مبيعات رقم [{invoice_num}] بقيمة {total}", 'MOVEMENT')
+                    return self._send_json({"success": True, "invoiceNumber": invoice_num, "message": "تم حفظ الفاتورة بنجاح"})
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
+
+            return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
+        except Exception as top_err:
+            try:
+                self._send_json({"success": False, "error": str(top_err)}, 500)
+            except Exception:
+                pass
+
+    def do_PUT(self):
+        try:
+            parsed_path = self.path.split('?')[0].split('#')[0]
+            if parsed_path.startswith('/api/products/'):
+                try:
+                    p_id = parsed_path.replace('/api/products/', '')
+                    data = self._read_json_body()
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            row = self._find_product(cursor, p_id)
+                            if not row and data.get('code'):
+                                row = self._find_product(cursor, data.get('code'))
+                            if not row and data.get('name'):
+                                row = self._find_product(cursor, data.get('name'))
+
+                            actual_id = str(row[0]) if row else str(p_id)
+                            old_code = row[1] if row else (data.get('code') or '')
+                            old_name = row[2] if row else (data.get('name') or '')
+                            
+                            if row:
+                                old_stock = int(row[3])
+                                old_price = float(row[4]) if len(row) > 4 else 0.0
+                                new_stock = int(data.get('stock', old_stock))
+                                new_price = float(data.get('price', old_price))
+                                if new_stock != old_stock:
+                                    diff = new_stock - old_stock
+                                    mov_id = f"mvt_{int(time.time()*1000)}"
+                                    cursor.execute('''
+                                        INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    ''', (mov_id, 'MANUAL-ADJUST', actual_id, data.get('code', old_code), data.get('name', old_name), 'ADJUSTMENT', abs(diff), old_stock, new_stock, f"تعديل يدوي للرصيد ({'+' if diff > 0 else ''}{diff})", data.get('username') or 'المدير العام', now_iso))
+
+                            raw_code = (data.get('code') or old_code).strip()
                             if not raw_code:
-                                p_code = f"NASSER-{max_num}"
+                                p_code = f"NASSER-{actual_id}"
                             elif not raw_code.upper().startswith('NASSER-'):
                                 p_code = f"NASSER-{raw_code}"
                             else:
                                 p_code = raw_code
-                            
-                            # Ensure code uniqueness
-                            cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (p_code,))
-                            if cursor.fetchone()[0] > 0:
-                                p_code = f"{p_code}_{int(time.time()) % 1000}_{idx}"
 
-                            p_cat = itm.get('category') or 'عام'
-                            p_unit = itm.get('unit') or 'وحدة'
-                            p_desc = itm.get('description') or ''
-                            p_stock = max(0, int(itm.get('stock') or 0))
-                            p_price = max(0.0, float(itm.get('price') or 0.0))
-                            p_min = max(1, int(itm.get('minStock') or 5))
+                            p_name = (data.get('name') or old_name).strip()
+                            p_cat = data.get('category') or 'عام'
+                            p_stock = max(0, int(data.get('stock', 0)))
+                            p_min = max(1, int(data.get('minStock', 5)))
+                            p_unit = data.get('unit') or 'وحدة'
+                            p_price = max(0.0, float(data.get('price', 0.0)))
+                            p_desc = data.get('description') or ''
 
-                            cursor.execute('''
-                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso))
-                            
-                            p_id = str(cursor.lastrowid)
-
-                            if p_stock > 0:
-                                mov_id = f"mvt_{int(time.time()*1000)}_{p_id}"
-                                cursor.execute('''
-                                    INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', (mov_id, 'BATCH-OPENING', p_id, p_code, p_name, 'IN', p_stock, 0, p_stock, 'رصيد إدخال افتتاحي دفعة واحدة', data.get('username') or 'المدير العام', now_iso))
-
-                            created_products.append({
-                                "id": p_id, "code": p_code, "name": p_name, "category": p_cat,
-                                "stock": p_stock, "minStock": p_min, "unit": p_unit, "price": p_price,
-                                "description": p_desc, "updatedAt": now_iso
-                            })
-
-                        commit_and_sync(conn)
-                    finally:
-                        conn.close()
-
-                add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'إضافة أصناف دفعة واحدة', f"تم إضافة {len(created_products)} صنف بنجاح وحفظها نهائياً", 'MOVEMENT')
-                return self._send_json({"success": True, "count": len(created_products), "products": created_products, "message": f"تم إضافة {len(created_products)} صنف بنجاح"})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
-
-        # 8. Single Movement Endpoint (Stock In / Out / Adjustment)
-        if parsed_path == '/api/movements':
-            try:
-                data = self._read_json_body()
-                p_id_raw = str(data.get('productId') or data.get('productCode') or data.get('code') or data.get('productName') or data.get('name') or '').strip()
-                m_type = data.get('type', 'OUT')
-                ref_no = data.get('referenceNo', '')
-                reason_str = data.get('reason', '')
-                op_name = data.get('operatorName') or 'أمين المخزن'
-                try:
-                    qty = int(data.get('quantity', 1))
-                except Exception:
-                    qty = 1
-                
-                mov_id = f"mov_{int(time.time()*1000)}"
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-
-                        p_row = self._find_product(cursor, p_id_raw)
-                        if not p_row and data.get('productCode'):
-                            p_row = self._find_product(cursor, data.get('productCode'))
-                        if not p_row and data.get('productName'):
-                            p_row = self._find_product(cursor, data.get('productName'))
-                        
-                        actual_id = p_id_raw
-                        p_code = data.get('productCode') or ""
-                        p_name = data.get('productName') or "صنف مخزني"
-                        previous_stock = 0
-                        new_stock = 0
-
-                        if p_row:
-                            actual_id = str(p_row[0])
-                            p_code = p_row[1]
-                            p_name = p_row[2]
-                            previous_stock = int(p_row[3])
-                            
-                            if m_type == 'IN':
-                                new_stock = previous_stock + qty
-                            elif m_type == 'OUT':
-                                new_stock = max(0, previous_stock - qty)
-                            elif m_type == 'ADJUSTMENT':
-                                new_stock = max(0, qty)
-                            else:
-                                new_stock = previous_stock
-                            
-                            cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
-                        else:
-                            new_stock = max(0, qty)
-
-                        cursor.execute('''
-                            INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (mov_id, ref_no, actual_id, p_code, p_name, m_type, qty, previous_stock, new_stock, reason_str, op_name, now_iso))
-
-                        commit_and_sync(conn)
-                    finally:
-                        conn.close()
-
-                movement_obj = {
-                    "id": mov_id,
-                    "productId": actual_id,
-                    "productCode": p_code,
-                    "productName": p_name,
-                    "type": m_type,
-                    "quantity": qty,
-                    "previousStock": previous_stock,
-                    "newStock": new_stock,
-                    "reason": reason_str,
-                    "referenceNo": ref_no,
-                    "operatorName": op_name,
-                    "timestamp": now_iso
-                }
-                add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'حركة مخزنية', f"{m_type} - {p_name} ({qty}) - الرصيد الجديد: {new_stock}", 'MOVEMENT')
-                return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات بنجاح"})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
-
-        # 9. BATCH MOVEMENTS ENDPOINT (Atomic Invoice Processing - Solves Database Lock)
-        if parsed_path == '/api/movements/batch':
-            try:
-                data = self._read_json_body()
-                items = data.get('items', [])
-                ref_no = data.get('referenceNo', '1')
-                reason_str = data.get('reason', 'فاتورة مبيعات')
-                op_name = data.get('operatorName') or 'أمين المخزن'
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-
-                if not items:
-                    return self._send_json({"success": False, "message": "لا توجد أصناف في الفاتورة"}, 400)
-
-                created_movements = []
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-
-                        # مرحلة التحقق أولاً: التأكد من توفر الرصيد لجميع الأصناف
-                        for idx, itm in enumerate(items):
-                            p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
-                            try:
-                                qty = max(1, int(itm.get('quantity', 1)))
-                            except Exception:
-                                qty = 1
-                            
-                            p_row = self._find_product(cursor, p_id_key)
-                            if not p_row and itm.get('productCode'):
-                                p_row = self._find_product(cursor, itm.get('productCode'))
-                            if not p_row and itm.get('productName'):
-                                p_row = self._find_product(cursor, itm.get('productName'))
-
-                            if not p_row:
-                                label = itm.get('productName') or itm.get('productCode') or p_id_key or f"بند {idx+1}"
-                                return self._send_json({"success": False, "message": f"الصنف ({label}) غير موجود بالمخزن"}, 404)
-                            if int(p_row[3]) < qty:
-                                return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {p_row[3]} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
-
-                        # مرحلة التنفيذ الذري: خصم الكميات وتسجيل الحركات دفعة واحدة
-                        for idx, itm in enumerate(items):
-                            p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
-                            try:
-                                qty = max(1, int(itm.get('quantity', 1)))
-                            except Exception:
-                                qty = 1
-
-                            p_row = self._find_product(cursor, p_id_key)
-                            if not p_row and itm.get('productCode'):
-                                p_row = self._find_product(cursor, itm.get('productCode'))
-                            if not p_row and itm.get('productName'):
-                                p_row = self._find_product(cursor, itm.get('productName'))
-
-                            actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3])
-                            new_stock = max(0, prev_stock - qty)
-
-                            cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
-
-                            mov_id = f"mov_{int(time.time()*1000)}_{idx}"
-                            cursor.execute('''
-                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (mov_id, ref_no, actual_id, p_code, p_name, 'OUT', qty, prev_stock, new_stock, reason_str, op_name, now_iso))
-
-                            created_movements.append({
-                                "id": mov_id,
-                                "productId": actual_id,
-                                "productCode": p_code,
-                                "productName": p_name,
-                                "type": "OUT",
-                                "quantity": qty,
-                                "previousStock": prev_stock,
-                                "newStock": new_stock,
-                                "reason": reason_str,
-                                "referenceNo": ref_no,
-                                "operatorName": op_name,
-                                "timestamp": now_iso
-                            })
-
-                        commit_and_sync(conn)
-                    finally:
-                        conn.close()
-
-                add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'صرف فاتورة مبيعات (دفعة واحدة)', f"تم صرف وتوثيق عدد ({len(created_movements)}) أصناف بموجب فاتورة رقم [{ref_no}] بنجاح", 'MOVEMENT')
-                return self._send_json({"success": True, "movements": created_movements, "message": f"تم صرف وتوثيق الفاتورة رقم [{ref_no}] بنجاح"})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
-
-        # 10. Add Sale Invoice Record
-        if parsed_path == '/api/sales':
-            try:
-                data = self._read_json_body()
-                items = data.get('items', [])
-                customer_name = data.get('customerName', '').strip()
-                customer_phone = data.get('customerPhone', '').strip()
-                cashier_name = data.get('cashierName', 'مسؤول المبيعات').strip()
-                cashier_id = data.get('cashierId', 'usr_1')
-                subtotal = float(data.get('subtotal', 0.0))
-                discount = float(data.get('discount', 0.0))
-                tax = float(data.get('tax', 0.0))
-                total = float(data.get('total', subtotal - discount + tax))
-                payment_method = data.get('paymentMethod', 'CASH')
-                notes = data.get('notes', '')
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT COUNT(*) FROM sales")
-                        count = cursor.fetchone()[0] + 1
-                        invoice_num = data.get('invoiceNumber') or f"INV-{time.strftime('%Y%m')}-{count:04d}"
-                        sale_id = f"sale_{int(time.time()*1000)}"
-
-                        cursor.execute('''
-                            INSERT INTO sales (id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (sale_id, invoice_num, now_iso, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, json.dumps(items, ensure_ascii=False), notes))
-
-                        commit_and_sync(conn)
-                    finally:
-                        conn.close()
-
-                add_audit_log(cashier_name, 'WAREHOUSE_MANAGER', 'تسجيل فاتورة', f"تم تسجيل فاتورة مبيعات رقم [{invoice_num}] بقيمة {total}", 'MOVEMENT')
-                return self._send_json({"success": True, "invoiceNumber": invoice_num, "message": "تم حفظ الفاتورة بنجاح"})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
-
-        return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
-
-    def do_PUT(self):
-        parsed_path = self.path.split('?')[0]
-        if parsed_path.startswith('/api/products/'):
-            try:
-                p_id = parsed_path.replace('/api/products/', '')
-                data = self._read_json_body()
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        row = self._find_product(cursor, p_id)
-                        if not row and data.get('code'):
-                            row = self._find_product(cursor, data.get('code'))
-                        if not row and data.get('name'):
-                            row = self._find_product(cursor, data.get('name'))
-
-                        actual_id = str(row[0]) if row else str(p_id)
-                        old_code = row[1] if row else (data.get('code') or '')
-                        old_name = row[2] if row else (data.get('name') or '')
-                        
-                        if row:
-                            old_stock = int(row[3])
-                            old_price = float(row[4]) if len(row) > 4 else 0.0
-                            new_stock = int(data.get('stock', old_stock))
-                            new_price = float(data.get('price', old_price))
-                            if new_stock != old_stock:
-                                diff = new_stock - old_stock
-                                mov_id = f"mvt_{int(time.time()*1000)}"
-                                cursor.execute('''
-                                    INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', (mov_id, 'MANUAL-ADJUST', actual_id, data.get('code', old_code), data.get('name', old_name), 'ADJUSTMENT', abs(diff), old_stock, new_stock, f"تعديل يدوي للرصيد ({'+' if diff > 0 else ''}{diff})", data.get('username') or 'المدير العام', now_iso))
-
-                        raw_code = (data.get('code') or old_code).strip()
-                        if not raw_code:
-                            p_code = f"NASSER-{actual_id}"
-                        elif not raw_code.upper().startswith('NASSER-'):
-                            p_code = f"NASSER-{raw_code}"
-                        else:
-                            p_code = raw_code
-
-                        p_name = (data.get('name') or old_name).strip()
-                        p_cat = data.get('category') or 'عام'
-                        p_stock = max(0, int(data.get('stock', 0)))
-                        p_min = max(1, int(data.get('minStock', 5)))
-                        p_unit = data.get('unit') or 'وحدة'
-                        p_price = max(0.0, float(data.get('price', 0.0)))
-                        p_desc = data.get('description') or ''
-
-                        cursor.execute('''
-                            UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
-                            WHERE id=? OR code=?
-                        ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, actual_id))
-                        
-                        if cursor.rowcount == 0:
                             cursor.execute('''
                                 UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
-                                WHERE id=? OR code=? OR name=?
-                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, p_id, p_id, p_name))
+                                WHERE id=? OR code=?
+                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, actual_id))
+                            
+                            if cursor.rowcount == 0:
+                                cursor.execute('''
+                                    UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
+                                    WHERE id=? OR code=? OR name=?
+                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, p_id, p_id, p_name))
 
-                        commit_and_sync(conn)
-                    finally:
-                        conn.close()
+                            commit_and_sync(conn)
+                        finally:
+                            conn.close()
 
-                add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'تعديل صنف', f"تم تحديث بيانات الصنف [{p_code}] {p_name}", 'INFO')
-                return self._send_json({"success": True, "message": "تم تحديث الصنف وحفظ التعديلات نهائياً", "product": {
-                    "id": actual_id, "code": p_code, "name": p_name, "category": p_cat,
-                    "stock": p_stock, "minStock": p_min, "unit": p_unit, "price": p_price,
-                    "description": p_desc, "updatedAt": now_iso
-                }})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
+                    add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'تعديل صنف', f"تم تحديث بيانات الصنف [{p_code}] {p_name}", 'INFO')
+                    return self._send_json({"success": True, "message": "تم تحديث الصنف وحفظ التعديلات نهائياً", "product": {
+                        "id": actual_id, "code": p_code, "name": p_name, "category": p_cat,
+                        "stock": p_stock, "minStock": p_min, "unit": p_unit, "price": p_price,
+                        "description": p_desc, "updatedAt": now_iso
+                    }})
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
 
-        return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
+            return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
+        except Exception as top_err:
+            try:
+                self._send_json({"success": False, "error": str(top_err)}, 500)
+            except Exception:
+                pass
 
     def do_DELETE(self):
-        parsed_path = self.path.split('?')[0]
-        if parsed_path.startswith('/api/products/'):
+        try:
+            parsed_path = self.path.split('?')[0].split('#')[0]
+            if parsed_path.startswith('/api/products/'):
+                try:
+                    p_id = parsed_path.replace('/api/products/', '')
+                    with DB_LOCK:
+                        conn = get_db_connection()
+                        try:
+                            cursor = conn.cursor()
+                            row = self._find_product(cursor, p_id)
+                            actual_id = str(row[0]) if row else str(p_id)
+                            p_code = str(row[1]) if row else str(p_id)
+                            p_name = row[2] if row else p_id
+                            
+                            cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, p_code))
+                            if cursor.rowcount == 0:
+                                cursor.execute("DELETE FROM products WHERE id=? OR code=? OR name=?", (p_id, p_id, p_name))
+                            cursor.execute("DELETE FROM movements WHERE product_id=? OR product_code=?", (actual_id, p_code))
+                            commit_and_sync(conn)
+                        finally:
+                            conn.close()
+
+                    add_audit_log('المدير العام', 'GENERAL_MANAGER', 'حذف صنف', f"تم حذف الصنف [{p_code}] {p_name} نهائياً", 'WARNING')
+                    return self._send_json({"success": True, "message": "تم حذف الصنف من المخزن نهائياً"})
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
+
+            return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
+        except Exception as top_err:
             try:
-                p_id = parsed_path.replace('/api/products/', '')
-                with DB_LOCK:
-                    conn = get_db_connection()
-                    try:
-                        cursor = conn.cursor()
-                        row = self._find_product(cursor, p_id)
-                        actual_id = str(row[0]) if row else str(p_id)
-                        p_code = str(row[1]) if row else str(p_id)
-                        p_name = row[2] if row else p_id
-                        
-                        cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, p_code))
-                        if cursor.rowcount == 0:
-                            cursor.execute("DELETE FROM products WHERE id=? OR code=? OR name=?", (p_id, p_id, p_name))
-                        cursor.execute("DELETE FROM movements WHERE product_id=? OR product_code=?", (actual_id, p_code))
-                        commit_and_sync(conn)
-                    finally:
-                        conn.close()
-
-                add_audit_log('المدير العام', 'GENERAL_MANAGER', 'حذف صنف', f"تم حذف الصنف [{p_code}] {p_name} نهائياً", 'WARNING')
-                return self._send_json({"success": True, "message": "تم حذف الصنف من المخزن نهائياً"})
-            except Exception as e:
-                return self._send_json({"success": False, "message": str(e)}, 500)
-
-        return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
+                self._send_json({"success": False, "error": str(top_err)}, 500)
+            except Exception:
+                pass
 
 # -------------------------------------------------------------
 # 4. HTTP Server Runner on Thread with Strict Event Sync
@@ -1430,6 +1453,10 @@ def start_local_server():
         class ThreadedTCPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
             daemon_threads = True
             allow_reuse_address = True
+            
+            def handle_error(self, request, client_address):
+                # كتم وتجاهل انقطاع اتصال المتصفح العادي بدون انهيار الخادم
+                pass
 
         # ربط الخادم مباشرة على منفذ حر موثوق ديناميكياً لتجنب التعارض
         httpd = ThreadedTCPServer(('127.0.0.1', 0), SPAHTTPRequestHandler)
