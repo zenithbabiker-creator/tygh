@@ -498,7 +498,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         """إلغاء أو تأمين تسجيل السجلات لمنع انهيار الخادم عند تشغيله بدون موجه أوامر (Windows --noconsole)"""
         try:
             if sys.stderr is not None:
-                sys.stderr.write("%s - - [%s] %s\n" % (self.address_string(), self.log_date_time_string(), format % args))
+                sys.stderr.write("%s - - [%s] %s\\n" % (self.address_string(), self.log_date_time_string(), format % args))
         except Exception:
             pass
 
