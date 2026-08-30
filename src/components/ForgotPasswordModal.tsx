@@ -223,8 +223,8 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
-      <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+    <div className="modal-overlay-stable" dir="rtl">
+      <div className="modal-content-stable bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
         
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">

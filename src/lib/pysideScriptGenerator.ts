@@ -206,7 +206,8 @@ def init_sqlite_db():
                     stock INTEGER NOT NULL DEFAULT 0,
                     min_stock INTEGER DEFAULT 5,
                     unit TEXT DEFAULT 'وحدة',
-                    price REAL DEFAULT 0,
+                    price REAL NOT NULL DEFAULT 0.0,
+                    unit_price REAL NOT NULL DEFAULT 0.0,
                     description TEXT DEFAULT '',
                     updated_at TEXT
                 )
@@ -311,10 +312,18 @@ def init_sqlite_db():
                 ('stock', 'INTEGER DEFAULT 0'),
                 ('min_stock', 'INTEGER DEFAULT 5'),
                 ('unit', 'TEXT DEFAULT "وحدة"'),
-                ('price', 'REAL DEFAULT 0'),
+                ('price', 'REAL DEFAULT 0.0'),
+                ('unit_price', 'REAL DEFAULT 0.0'),
                 ('description', 'TEXT DEFAULT ""'),
                 ('updated_at', 'TEXT DEFAULT ""')
             ])
+
+            # تنظيف أي قيم خالية في أسعار الأصناف لضمان استقرار العمليات الحسابية
+            try:
+                cursor.execute("UPDATE products SET price = 0.0 WHERE price IS NULL")
+                cursor.execute("UPDATE products SET unit_price = price WHERE unit_price IS NULL OR unit_price = 0.0")
+            except Exception:
+                pass
 
             ensure_columns('sales', [
                 ('invoice_number', 'TEXT DEFAULT ""'),
@@ -1415,13 +1424,15 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         try:
                             cursor = conn.cursor()
                             row = self._find_product(cursor, p_id)
-                            actual_id = str(row[0]) if row else str(p_id)
-                            p_code = str(row[1]) if row else str(p_id)
-                            p_name = row[2] if row else p_id
+                            if not row:
+                                return self._send_json({"success": False, "message": "الصنف المطلوب حذفه غير موجود بالمخزن"}, 404)
                             
-                            cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, p_code))
-                            if cursor.rowcount == 0:
-                                cursor.execute("DELETE FROM products WHERE id=? OR code=? OR name=?", (p_id, p_id, p_name))
+                            actual_id = str(row[0])
+                            p_code = str(row[1])
+                            p_name = str(row[2])
+                            
+                            # حذف محدد ودقيق بنسبة 100% باستخدام المعرف الفعلي (Primary Key ID) فقط لمنع أي مسح جماعي
+                            cursor.execute("DELETE FROM products WHERE id=?", (actual_id,))
                             cursor.execute("DELETE FROM movements WHERE product_id=? OR product_code=?", (actual_id, p_code))
                             commit_and_sync(conn)
                         finally:

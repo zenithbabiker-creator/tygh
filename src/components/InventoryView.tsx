@@ -1465,8 +1465,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
       {/* SINGLE ITEM ADD / EDIT PRODUCT MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+        <div className="modal-overlay-stable">
+          <div className="modal-content-stable bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
             
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
@@ -1533,16 +1533,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <input
                     type="number"
                     min="0"
+                    step="1"
                     required
                     value={stock}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      if (isNaN(val) || val < 0) {
+                    onChange={(e) => setStock(e.target.value)}
+                    onBlur={() => {
+                      if (!stock.trim() || isNaN(parseInt(stock, 10)) || parseInt(stock, 10) < 0) {
                         setStock('0');
-                      } else {
-                        setStock(String(val));
                       }
                     }}
+                    placeholder="0"
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none"
                   />
                 </div>
@@ -1555,14 +1555,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     step="any"
                     required
                     value={price}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      if (isNaN(val) || val < 0) {
+                    onChange={(e) => setPrice(e.target.value)}
+                    onBlur={() => {
+                      if (!price.trim() || isNaN(parseFloat(price)) || parseFloat(price) < 0) {
                         setPrice('0');
-                      } else {
-                        setPrice(String(val));
                       }
                     }}
+                    placeholder="0.00"
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none"
                   />
                 </div>

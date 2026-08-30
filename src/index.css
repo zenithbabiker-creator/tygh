@@ -26,6 +26,29 @@
   background: #94a3b8;
 }
 
+/* Anti-flickering Hardware Compositing Isolation for Dialogs & Modals */
+.modal-overlay-stable {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background-color: rgba(15, 23, 42, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: opacity;
+  contain: layout paint;
+}
+
+.modal-content-stable {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+  contain: layout style;
+}
+
 /* Print Styles for Invoices and Delivery Orders */
 @media print {
   html, body {

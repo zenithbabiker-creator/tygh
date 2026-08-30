@@ -123,8 +123,8 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
     : '1';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border-2 border-black max-h-[95vh] overflow-y-auto space-y-6 text-black">
+    <div className="modal-overlay-stable">
+      <div className="modal-content-stable bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border-2 border-black max-h-[95vh] overflow-y-auto space-y-6 text-black">
         
         {/* Controls Bar (no-print) */}
         <div className="flex items-center justify-between pb-3 border-b-2 border-black no-print">
