@@ -185,9 +185,28 @@ def commit_and_sync(conn):
     """
     try:
         conn.commit()
-        conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+        except Exception:
+            pass
     except Exception as e:
         print("Commit & Sync error:", e)
+
+def flush_db_on_exit():
+    """ضمان تفريغ سجل التغييرات WAL بالكامل في ملف قاعدة البيانات الرئيسي عند إغلاق التطبيق"""
+    try:
+        with DB_LOCK:
+            conn = get_db_connection()
+            try:
+                conn.commit()
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+            finally:
+                conn.close()
+    except Exception:
+        pass
+
+import atexit
+atexit.register(flush_db_on_exit)
 
 def init_sqlite_db():
     """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL وترقية المخطط (Schema Migration)"""
@@ -1216,39 +1235,49 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                             # مرحلة التحقق أولاً: التأكد من توفر الرصيد لجميع الأصناف
                             for idx, itm in enumerate(items):
-                                p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
+                                p_id_key = str(itm.get('productId') or '').strip()
+                                p_code_key = str(itm.get('productCode') or itm.get('code') or '').strip()
+                                p_name_key = str(itm.get('productName') or itm.get('name') or '').strip()
                                 try:
                                     qty = max(1, int(itm.get('quantity', 1)))
                                 except Exception:
                                     qty = 1
                                 
-                                p_row = self._find_product(cursor, p_id_key)
-                                if not p_row and itm.get('productCode'):
-                                    p_row = self._find_product(cursor, itm.get('productCode'))
-                                if not p_row and itm.get('productName'):
-                                    p_row = self._find_product(cursor, itm.get('productName'))
+                                p_row = None
+                                if p_id_key:
+                                    p_row = self._find_product(cursor, p_id_key)
+                                if not p_row and p_code_key:
+                                    p_row = self._find_product(cursor, p_code_key)
+                                if not p_row and p_name_key:
+                                    p_row = self._find_product(cursor, p_name_key)
 
                                 if not p_row:
-                                    label = itm.get('productName') or itm.get('productCode') or p_id_key or f"بند {idx+1}"
+                                    label = p_name_key or p_code_key or p_id_key or f"بند {idx+1}"
                                     return self._send_json({"success": False, "message": f"الصنف ({label}) غير موجود بالمخزن"}, 404)
-                                if int(p_row[3]) < qty:
-                                    return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {p_row[3]} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
+                                
+                                available_stock = int(p_row[3]) if p_row[3] is not None else 0
+                                if available_stock < qty:
+                                    return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {available_stock} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
 
                             # مرحلة التنفيذ الذري: خصم الكميات وتسجيل الحركات دفعة واحدة
                             for idx, itm in enumerate(items):
-                                p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
+                                p_id_key = str(itm.get('productId') or '').strip()
+                                p_code_key = str(itm.get('productCode') or itm.get('code') or '').strip()
+                                p_name_key = str(itm.get('productName') or itm.get('name') or '').strip()
                                 try:
                                     qty = max(1, int(itm.get('quantity', 1)))
                                 except Exception:
                                     qty = 1
 
-                                p_row = self._find_product(cursor, p_id_key)
-                                if not p_row and itm.get('productCode'):
-                                    p_row = self._find_product(cursor, itm.get('productCode'))
-                                if not p_row and itm.get('productName'):
-                                    p_row = self._find_product(cursor, itm.get('productName'))
+                                p_row = None
+                                if p_id_key:
+                                    p_row = self._find_product(cursor, p_id_key)
+                                if not p_row and p_code_key:
+                                    p_row = self._find_product(cursor, p_code_key)
+                                if not p_row and p_name_key:
+                                    p_row = self._find_product(cursor, p_name_key)
 
-                                actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3])
+                                actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3] if p_row[3] is not None else 0)
                                 new_stock = max(0, prev_stock - qty)
 
                                 cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
@@ -1603,6 +1632,14 @@ try:
                     err_msg.setText(f"تعذر إتمام عملية الطباعة الداخلية:\\n{pe}")
                     err_msg.setIcon(QMessageBox.Warning)
                     err_msg.exec()
+
+        def closeEvent(self, event):
+            """إجراء تفريغ نهائي لقاعدة البيانات وحفظ كافة التغييرات بأمان عند إغلاق النافذة"""
+            try:
+                flush_db_on_exit()
+            except Exception:
+                pass
+            event.accept()
 
 except ImportError:
     pass

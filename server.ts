@@ -1000,28 +1000,37 @@ app.post('/api/movements/batch', (req, res) => {
   const { items, referenceNo, reason, operatorName, role } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ success: false, message: 'لا توجد أصناف في أمر التسليم' });
+    return res.status(400).json({ success: false, message: 'فشلت العملية، لا توجد أصناف في أمر التسليم' });
   }
 
   const db = readDB();
   const opName = operatorName || 'أمين المخزن';
   const now = new Date().toISOString();
   const refNo = (referenceNo || '').trim() || '1';
-  const reasonText = (reason || '').trim() || 'أمر تسليم مخزن';
+  const reasonText = (reason || '').trim() || 'فاتورة مبيعات';
 
   // 1. Validation phase: check that all items exist and have sufficient stock
   for (const itm of items) {
-    const key = itm.productId || itm.productCode || itm.code || itm.productName || itm.name;
-    const qty = Number(itm.quantity) || 1;
-    const prod = findProductInList(db.products, key) || (itm.productCode ? findProductInList(db.products, itm.productCode) : undefined) || (itm.productName ? findProductInList(db.products, itm.productName) : undefined);
+    const pId = itm.productId ? String(itm.productId).trim() : '';
+    const pCode = itm.productCode ? String(itm.productCode).trim() : '';
+    const pName = itm.productName ? String(itm.productName).trim() : '';
+    const fallbackKey = itm.code || itm.name || '';
+    const qty = Math.max(1, Number(itm.quantity) || 1);
+
+    const prod = (pId ? findProductInList(db.products, pId) : undefined) ||
+                 (pCode ? findProductInList(db.products, pCode) : undefined) ||
+                 (pName ? findProductInList(db.products, pName) : undefined) ||
+                 (fallbackKey ? findProductInList(db.products, fallbackKey) : undefined);
+
     if (!prod) {
-      const label = itm.productName || itm.productCode || key || 'غير معروف';
+      const label = pName || pCode || pId || fallbackKey || 'غير معروف';
       return res.status(404).json({ success: false, message: `الصنف (${label}) غير موجود بالمخزن` });
     }
-    if (prod.stock < qty) {
+    const currentStock = Number(prod.stock) || 0;
+    if (currentStock < qty) {
       return res.status(400).json({
         success: false,
-        message: `الرصيد المتاح من (${prod.name}) هو ${prod.stock} فقط، ولا يكفي لصرف كمية ${qty}`,
+        message: `الرصيد المتاح من (${prod.name}) هو ${currentStock} فقط، ولا يكفي لصرف كمية ${qty}`,
       });
     }
   }
@@ -1029,10 +1038,18 @@ app.post('/api/movements/batch', (req, res) => {
   // 2. Execution phase: deduct stock and record movements
   const createdMovements: StockMovement[] = [];
   for (const itm of items) {
-    const key = itm.productId || itm.productCode || itm.code || itm.productName || itm.name;
-    const qty = Number(itm.quantity) || 1;
-    const prod = (findProductInList(db.products, key) || (itm.productCode ? findProductInList(db.products, itm.productCode) : undefined) || (itm.productName ? findProductInList(db.products, itm.productName) : undefined))!;
-    const previousStock = prod.stock;
+    const pId = itm.productId ? String(itm.productId).trim() : '';
+    const pCode = itm.productCode ? String(itm.productCode).trim() : '';
+    const pName = itm.productName ? String(itm.productName).trim() : '';
+    const fallbackKey = itm.code || itm.name || '';
+    const qty = Math.max(1, Number(itm.quantity) || 1);
+
+    const prod = ((pId ? findProductInList(db.products, pId) : undefined) ||
+                  (pCode ? findProductInList(db.products, pCode) : undefined) ||
+                  (pName ? findProductInList(db.products, pName) : undefined) ||
+                  (fallbackKey ? findProductInList(db.products, fallbackKey) : undefined))!;
+
+    const previousStock = Number(prod.stock) || 0;
     const newStock = Math.max(0, previousStock - qty);
 
     prod.stock = newStock;

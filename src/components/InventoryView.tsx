@@ -250,22 +250,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Complete Order & Print Invoice Document
   const handleCompleteInvoice = async () => {
-    if (cartItems.length === 0) return;
+    if (!cartItems || cartItems.length === 0) {
+      alert('💡 تنبيه: سلة الفاتورة فارغة حالياً. يرجى اختيار الأصناف أولاً.');
+      return;
+    }
     if (!recipientName.trim()) {
       alert('تنبيه هام: يرجى كتابة اسم المستلم / العميل قبل طباعة الفاتورة.');
       return;
     }
 
-    // Pre-flight validation: check all cart items against current stock
+    // Pre-flight validation: check all cart items against current stock with numeric normalization
     for (const item of cartItems) {
-      const liveProd = products.find(p => p.id === item.product.id);
-      const available = liveProd ? liveProd.stock : item.product.stock;
-      if (item.quantity > available) {
-        alert(`خطأ في العملية: الكمية المطلوبة للصنف (${item.product.name}) هي ${item.quantity} ولكن الرصيد المتاح هو ${available} فقط! يرجى تعديل الكمية أولاً.`);
-        return;
-      }
+      const liveProd = products.find(p => 
+        (p.id && item.product.id && p.id === item.product.id) || 
+        (p.code && item.product.code && p.code === item.product.code) ||
+        p.name === item.product.name
+      );
+      const available = Number(liveProd ? liveProd.stock : item.product.stock) || 0;
+      const requestedQty = Math.max(1, Number(item.quantity) || 1);
+
       if (available <= 0) {
         alert(`خطأ في العملية: الصنف (${item.product.name}) غير متوفر بالمخزن (الرصيد: 0). يرجى إزالته من الفاتورة.`);
+        return;
+      }
+      if (requestedQty > available) {
+        alert(`خطأ في العملية: الكمية المطلوبة للصنف (${item.product.name}) هي ${requestedQty} ولكن الرصيد المتاح هو ${available} فقط! يرجى تعديل الكمية أولاً.`);
         return;
       }
     }
@@ -289,22 +298,42 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }
       }
 
-      const dispatchItemsToPrint: DispatchItem[] = cartItems.map(item => ({
-        product: item.product,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        totalPrice: item.quantity * item.unitPrice,
-      }));
+      const dispatchItemsToPrint: DispatchItem[] = cartItems.map(item => {
+        const liveProd = products.find(p => 
+          (p.id && item.product.id && p.id === item.product.id) || 
+          (p.code && item.product.code && p.code === item.product.code) ||
+          p.name === item.product.name
+        ) || item.product;
+        const uPrice = Number(item.unitPrice ?? liveProd.price ?? item.product.price ?? 0);
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        return {
+          product: liveProd,
+          quantity: qty,
+          unitPrice: uPrice,
+          totalPrice: qty * uPrice,
+        };
+      });
+
+      const batchItemsPayload = cartItems.map(item => {
+        const liveProd = products.find(p => 
+          (p.id && item.product.id && p.id === item.product.id) || 
+          (p.code && item.product.code && p.code === item.product.code) ||
+          p.name === item.product.name
+        ) || item.product;
+
+        return {
+          productId: String(liveProd.id || item.product.id || ''),
+          productCode: String(liveProd.code || item.product.code || ''),
+          productName: String(liveProd.name || item.product.name || ''),
+          quantity: Math.max(1, Number(item.quantity) || 1),
+          unitPrice: Number(item.unitPrice ?? liveProd.price ?? item.product.price ?? 0),
+        };
+      });
 
       // Use atomic batch movement if available (100% resilient against Database Lock)
       if (onBatchStockMovement) {
         const res = await onBatchStockMovement({
-          items: cartItems.map(item => ({
-            productId: String(item.product.id || item.product.code || ''),
-            productCode: item.product.code || '',
-            productName: item.product.name || '',
-            quantity: item.quantity,
-          })),
+          items: batchItemsPayload,
           referenceNo: finalOrderNo,
           reason: `فاتورة مبيعات - المستلم/العميل: ${recipientName.trim()}`,
         });
@@ -316,11 +345,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }
       } else {
         // Fallback for sequential stock movement
-        for (const item of cartItems) {
+        for (const item of batchItemsPayload) {
           const res = await onStockMovement({
-            productId: String(item.product.id || item.product.code || ''),
-            productCode: item.product.code || '',
-            productName: item.product.name || '',
+            productId: item.productId,
+            productCode: item.productCode,
+            productName: item.productName,
             type: 'OUT',
             quantity: item.quantity,
             reason: `فاتورة مبيعات - المستلم/العميل: ${recipientName.trim()}`,

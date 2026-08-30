@@ -355,10 +355,14 @@ export default function App() {
 
   // Batch Stock Movements Handler (Delivery Orders - Atomic Execution)
   const handleBatchStockMovement = async (batchData: {
-    items: Array<{ productId: string; quantity: number }>;
+    items: Array<{ productId: string; quantity: number; productCode?: string; productName?: string; unitPrice?: number }>;
     reason: string;
     referenceNo: string;
   }) => {
+    if (!batchData.items || !Array.isArray(batchData.items) || batchData.items.length === 0) {
+      return { success: false, message: 'فشلت العملية، لا توجد أصناف في أمر التسليم' };
+    }
+
     try {
       const res = await safeJsonFetch('/api/movements/batch', {
         method: 'POST',
@@ -388,22 +392,38 @@ export default function App() {
     const createdMovements: StockMovement[] = [];
     let updatedProducts = [...products];
 
-    // Pre-check stock
+    // Pre-check stock with type-safe Number() conversions and multi-field matching
     for (const itm of batchData.items) {
-      const p = updatedProducts.find(prod => prod.id === itm.productId);
-      if (!p) return { success: false, message: 'صنف غير موجود' };
-      if (p.stock < itm.quantity) {
-        return { success: false, message: `الرصيد المتاح من (${p.name}) هو ${p.stock} فقط، ولا يكفي لصرف ${itm.quantity}` };
+      const requestedQty = Math.max(1, Number(itm.quantity) || 1);
+      const p = updatedProducts.find(prod => 
+        (itm.productId && prod.id === itm.productId) || 
+        (itm.productCode && prod.code === itm.productCode) || 
+        (itm.productName && prod.name === itm.productName) ||
+        (itm.productId && prod.code === itm.productId)
+      );
+      if (!p) {
+        const label = itm.productName || itm.productCode || itm.productId || 'غير معروف';
+        return { success: false, message: `الصنف (${label}) غير موجود بالمخزن` };
+      }
+      const availableStock = Number(p.stock) || 0;
+      if (availableStock < requestedQty) {
+        return { success: false, message: `الرصيد المتاح من (${p.name}) هو ${availableStock} فقط، ولا يكفي لصرف ${requestedQty}` };
       }
     }
 
-    // Deduct & create logs
+    // Deduct & create logs atomically
     for (const itm of batchData.items) {
-      const pIndex = updatedProducts.findIndex(prod => prod.id === itm.productId);
+      const requestedQty = Math.max(1, Number(itm.quantity) || 1);
+      const pIndex = updatedProducts.findIndex(prod => 
+        (itm.productId && prod.id === itm.productId) || 
+        (itm.productCode && prod.code === itm.productCode) || 
+        (itm.productName && prod.name === itm.productName) ||
+        (itm.productId && prod.code === itm.productId)
+      );
       const prod = updatedProducts[pIndex];
-      const prevStock = prod.stock;
-      const newStock = Math.max(0, prevStock - itm.quantity);
-      updatedProducts[pIndex] = { ...prod, stock: newStock };
+      const prevStock = Number(prod.stock) || 0;
+      const newStock = Math.max(0, prevStock - requestedQty);
+      updatedProducts[pIndex] = { ...prod, stock: newStock, updatedAt: new Date().toISOString() };
 
       const mov: StockMovement = {
         id: 'mvt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
@@ -411,7 +431,7 @@ export default function App() {
         productCode: prod.code,
         productName: prod.name,
         type: 'OUT',
-        quantity: itm.quantity,
+        quantity: requestedQty,
         previousStock: prevStock,
         newStock: newStock,
         reason: batchData.reason,
