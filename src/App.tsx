@@ -691,9 +691,9 @@ export default function App() {
             </div>
             <h1 className="text-2xl font-black tracking-wide text-white font-['Tajawal'] flex items-center justify-center gap-2">
               <span>شركة <span className="text-blue-400">NASSER</span></span>
-              <span className="text-[11px] font-mono bg-blue-600/30 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">v2.0.5</span>
+              <span className="text-[11px] font-mono bg-blue-600/30 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">v3.0.1</span>
             </h1>
-            <p className="text-xs text-slate-300 font-bold">نظام إدارة المخازن والمخزون والتوريد والتصريف - الإصدار (v2.0.5)</p>
+            <p className="text-xs text-slate-300 font-bold">نظام إدارة المخازن والمخزون والتوريد والتصريف - الإصدار (v3.0.1)</p>
           </div>
 
           {/* Error Banner */}
@@ -804,7 +804,7 @@ export default function App() {
           {/* Footer Info */}
           <div className="pt-4 border-t border-slate-800 text-center text-[10px] text-slate-400 flex items-center justify-between">
             <span>شركة NASSER - نظام إدارة المخازن 100% Offline</span>
-            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v2.0.5</span>
+            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v3.0.1</span>
           </div>
 
         </div>
@@ -838,7 +838,7 @@ export default function App() {
                   شركة <span className="text-blue-400">NASSER</span>
                 </h1>
                 <span className="text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 px-1.5 py-0.2 rounded-md">
-                  v2.0.5
+                  v3.0.1
                 </span>
               </div>
               <p className="text-[10px] text-blue-400 mt-0.5 font-bold tracking-widest uppercase">

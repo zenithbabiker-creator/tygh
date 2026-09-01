@@ -1,7 +1,7 @@
 name: Build Windows Application (.exe) & Installer
 
 # ==========================================================
-# شركة NASSER - نظام إدارة المخازن والمبيعات
+# شركة NASSER - نظام إدارة المخازن والمخزون
 # GitHub Actions Workflow لبناء مثبت ويندوز كامل (.exe Installer)
 # ==========================================================
 
@@ -34,33 +34,34 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 4. تثبيت مكتبات Node النظيف (Clean Install) وتجميع التطبيق
-      - name: Clean Install Node Dependencies & Build
+      # 4. تثبيت مكتبات Node النظيف وتجميع الواجهة (Vite React Build)
+      - name: Clean Install Node Dependencies & Build Frontend
         run: |
           rm -Force -ErrorAction SilentlyContinue package-lock.json
           rm -Force -ErrorAction SilentlyContinue -Recurse node_modules
           npm install --legacy-peer-deps
           npm run build
 
-      # 5. استخراج سكريبت بايثون الرئيسي تلقائياً من المولد المحدث
+      # 5. استخراج وتوليد سكريبت بايثون المحدث تلقائياً
       - name: Extract Python Desktop Script (nasser_company_app.py)
         run: |
           npm run generate:desktop
 
-      # 6. تثبيت مكتبات بايثون
+      # 6. تثبيت مكتبات بايثون المطلوبة للتشغيل والتغليف
       - name: Install Python Desktop Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install PySide6 pyinstaller pillow
 
-      # 7. توليد الأيقونة الخارجية لمكتبات الويندوز مع إجبار ترميز UTF-8
+
+      # 7. توليد الأيقونة الخارجية عالية الدقة لنظام ويندوز
       - name: Generate High-Res External Icon (assets/icon.ico)
         env:
           PYTHONIOENCODING: "utf-8"
         run: |
           python scripts/create_icon.py assets/icon.ico
 
-      # 8. بناء حزمة التطبيق الموجهة للمثبت (Onedir) مع عزل مجلد الإخراج
+      # 8. بناء حزمة التطبيق الموجهة لبرنامج التثبيت (Onedir)
       - name: Compile Desktop App for Installer
         env:
           PYTHONIOENCODING: "utf-8"
@@ -74,14 +75,14 @@ jobs:
         run: |
           pyinstaller --noconsole --onefile --icon=assets/icon.ico --add-data "dist;dist" --hidden-import=PySide6.QtWebEngineWidgets --hidden-import=PySide6.QtWebEngineCore --hidden-import=PySide6.QtPrintSupport --name="NASSER_Company_App_Portable" --distpath="py_build_portable" nasser_company_app.py
 
-      # 9. إنشاء ملف إعدادات التثبيت (Inno Setup Script) تلقائياً
+      # 9. إنشاء ملف إعدادات التثبيت (Inno Setup Script) المتوافق مع الإصدار الحالي
       - name: Create Inno Setup Script
         run: |
           $innoScript = @"
           [Setup]
           AppId={{8B84180A-24E0-4828-A4FB-B780EC82D884}
-          AppName=شركة ناصر - إدارة المخازن والمبيعات
-          AppVersion=2.0.5
+          AppName=شركة ناصر - إدارة المخازن والمخزون
+          AppVersion=3.0.1
           AppPublisher=محمد بابكر
           AppPublisherURL=https://nasser-company.com
           AppSupportURL=https://nasser-company.com
@@ -93,7 +94,7 @@ jobs:
           Compression=lzma2
           SolidCompression=yes
           OutputDir=installer_output
-          OutputBaseFilename=Nasser_Company_Setup_v2.0.5
+          OutputBaseFilename=Nasser_Company_Setup_v3.0.1
           SetupIconFile=assets\icon.ico
           ArchitecturesInstallIn64BitMode=x64compatible
           DisableProgramGroupPage=yes
@@ -107,9 +108,9 @@ jobs:
           Source: "assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
           [Icons]
-          Name: "{group}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"
-          Name: "{autodesktop}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"
-          Name: "{userdesktop}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+          Name: "{group}\شركة ناصر - إدارة المخازن والمخزون"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"
+          Name: "{autodesktop}\شركة ناصر - إدارة المخازن والمخزون"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"
+          Name: "{userdesktop}\شركة ناصر - إدارة المخازن والمخزون"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
           [Run]
           Filename: "{app}\NASSER_Company_App.exe"; Description: "تشغيل التطبيق الآن"; Flags: nowait postinstall skipifsilent
@@ -130,7 +131,7 @@ jobs:
           }
           & $isccPath setup_script.iss
 
-      # 11. رفع برنامج التثبيت النهائي (Nasser_Company_Setup_v1.0.1.exe)
+      # 11. رفع برنامج التثبيت النهائي (.exe Setup)
       - name: Upload Windows Installer (.exe Setup)
         uses: actions/upload-artifact@v4
         with:

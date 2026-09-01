@@ -1007,7 +1007,7 @@ app.post('/api/movements/batch', (req, res) => {
   const opName = operatorName || 'أمين المخزن';
   const now = new Date().toISOString();
   const refNo = (referenceNo || '').trim() || '1';
-  const reasonText = (reason || '').trim() || 'فاتورة مبيعات';
+  const reasonText = (reason || '').trim() || 'أمر تسليم مخزن';
 
   // 1. Validation phase: check that all items exist and have sufficient stock
   for (const itm of items) {

@@ -160,305 +160,353 @@ def get_db_path():
 
 def get_db_connection():
     """
-    إنشاء اتصال آمن بقاعدة البيانات مع تفعيل نمط WAL وتأمين الحفظ اللحظي على القرص الصلب.
-    تفعيل مهلة انتظار 60 ثانية لمنع حدوث Database Lock وضمان إتمام المعاملات فورياً.
+    إنشاء اتصال آمن بقاعدة البيانات مع تفعيل مهلة انتظار 60 ثانية لمنع حدوث Database Lock وضمان إتمام المعاملات فورياً.
     """
     db_path = get_db_path()
     conn = sqlite3.connect(db_path, timeout=60.0, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=FULL;")
-    conn.execute("PRAGMA busy_timeout=60000;")
-    conn.execute("PRAGMA wal_autocheckpoint=50;")
+    try:
+        conn.execute("PRAGMA busy_timeout=60000;")
+    except Exception:
+        pass
     return conn
 
 def commit_and_sync(conn):
     """
-    تنفيذ الحفظ النهائي اللحظي وإغلاق المعاملة ودفع البيانات مباشرة للقرص الصلب.
+    تنفيذ الحفظ النهائي اللحظي وإغلاق المعاملة ودفع البيانات مباشرة للقرص الصلب بأمان تام.
     """
     try:
         conn.commit()
-        conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
     except Exception as e:
-        print("Commit & Sync error:", e)
+        print("Commit error:", e)
+
+def flush_db_on_exit():
+    """ضمان حفظ التغييرات بالكامل في ملف قاعدة البيانات الرئيسي عند إغلاق التطبيق"""
+    try:
+        with DB_LOCK:
+            conn = get_db_connection()
+            try:
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception:
+        pass
+
+import atexit
+atexit.register(flush_db_on_exit)
 
 def init_sqlite_db():
-    """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL وترقية المخطط (Schema Migration)"""
+    """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL وترقية المخطط (Schema Migration) مع معالجة ذكية للـ Lock"""
     with DB_LOCK:
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            
-            # جدول المنتجات بتوليد تلقائي للمعرف (Auto-Increment Primary Key)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS products (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code TEXT UNIQUE NOT NULL,
-                    name TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    stock INTEGER NOT NULL DEFAULT 0,
-                    min_stock INTEGER DEFAULT 5,
-                    unit TEXT DEFAULT 'وحدة',
-                    price REAL DEFAULT 0,
-                    description TEXT DEFAULT '',
-                    updated_at TEXT
-                )
-            ''')
-            
-            # جدول الفواتير والمبيعات
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sales (
-                    id TEXT PRIMARY KEY,
-                    invoice_number TEXT UNIQUE NOT NULL,
-                    created_at TEXT NOT NULL,
-                    customer_name TEXT,
-                    customer_phone TEXT,
-                    cashier_id TEXT,
-                    cashier_name TEXT NOT NULL,
-                    subtotal REAL NOT NULL,
-                    discount REAL DEFAULT 0,
-                    tax REAL DEFAULT 0,
-                    total REAL NOT NULL,
-                    payment_method TEXT NOT NULL,
-                    items_json TEXT NOT NULL,
-                    notes TEXT
-                )
-            ''')
-            
-            # جدول المستخدمين
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id TEXT PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    gmail TEXT,
-                    created_at TEXT
-                )
-            ''')
-
-            # جدول سجل التدقيق والمراجعة
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS logs (
-                    id TEXT PRIMARY KEY,
-                    timestamp TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    details TEXT NOT NULL,
-                    type TEXT NOT NULL
-                )
-            ''')
-
-            # جدول حركات المخزون (تعديل، توريد، صرف، فواتير)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS movements (
-                    id TEXT PRIMARY KEY,
-                    reference_no TEXT,
-                    product_id TEXT NOT NULL,
-                    product_code TEXT,
-                    product_name TEXT,
-                    type TEXT NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    previous_stock INTEGER,
-                    new_stock INTEGER,
-                    reason TEXT,
-                    operator_name TEXT,
-                    created_at TEXT
-                )
-            ''')
-            
-            # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) ---
-            def ensure_columns(table_name, columns_to_check):
+        for attempt in range(5):
+            conn = None
+            try:
+                conn = get_db_connection()
                 try:
-                    cursor.execute(f"PRAGMA table_info({table_name})")
-                    existing = [r[1] for r in cursor.fetchall()]
-                    for col_name, col_def in columns_to_check:
-                        if col_name not in existing:
-                            try:
-                                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def};")
-                            except Exception as ex:
-                                print(f"Migration: add {col_name} to {table_name}:", ex)
-                except Exception as e:
-                    print(f"Schema check error on {table_name}:", e)
+                    conn.isolation_level = None
+                    conn.execute("PRAGMA journal_mode=WAL;")
+                    conn.execute("PRAGMA synchronous=NORMAL;")
+                    conn.execute("PRAGMA busy_timeout=60000;")
+                    conn.isolation_level = ""
+                except Exception:
+                    pass
 
-            ensure_columns('movements', [
-                ('reference_no', 'TEXT DEFAULT ""'),
-                ('product_id', 'TEXT DEFAULT ""'),
-                ('product_code', 'TEXT DEFAULT ""'),
-                ('product_name', 'TEXT DEFAULT ""'),
-                ('type', 'TEXT DEFAULT "OUT"'),
-                ('quantity', 'INTEGER DEFAULT 1'),
-                ('previous_stock', 'INTEGER DEFAULT 0'),
-                ('new_stock', 'INTEGER DEFAULT 0'),
-                ('reason', 'TEXT DEFAULT ""'),
-                ('operator_name', 'TEXT DEFAULT "أمين المخزن"'),
-                ('created_at', 'TEXT DEFAULT ""')
-            ])
+                cursor = conn.cursor()
+                
+                # جدول المنتجات بتوليد تلقائي للمعرف (Auto-Increment Primary Key)
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS products (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        code TEXT UNIQUE NOT NULL,
+                        name TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        stock INTEGER NOT NULL DEFAULT 0,
+                        min_stock INTEGER DEFAULT 5,
+                        unit TEXT DEFAULT 'وحدة',
+                        price REAL NOT NULL DEFAULT 0.0,
+                        unit_price REAL NOT NULL DEFAULT 0.0,
+                        description TEXT DEFAULT '',
+                        updated_at TEXT
+                    )
+                ''')
+                
+                # جدول أوامر التسليم والمبيعات
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS sales (
+                        id TEXT PRIMARY KEY,
+                        invoice_number TEXT UNIQUE NOT NULL,
+                        created_at TEXT NOT NULL,
+                        customer_name TEXT,
+                        customer_phone TEXT,
+                        cashier_id TEXT,
+                        cashier_name TEXT NOT NULL,
+                        subtotal REAL NOT NULL,
+                        discount REAL DEFAULT 0,
+                        tax REAL DEFAULT 0,
+                        total REAL NOT NULL,
+                        payment_method TEXT NOT NULL,
+                        items_json TEXT NOT NULL,
+                        notes TEXT
+                    )
+                ''')
+            
+                # جدول المستخدمين
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY,
+                        username TEXT UNIQUE NOT NULL,
+                        password TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        gmail TEXT,
+                        created_at TEXT
+                    )
+                ''')
 
-            ensure_columns('products', [
-                ('code', 'TEXT DEFAULT ""'),
-                ('name', 'TEXT DEFAULT ""'),
-                ('category', 'TEXT DEFAULT "عام"'),
-                ('stock', 'INTEGER DEFAULT 0'),
-                ('min_stock', 'INTEGER DEFAULT 5'),
-                ('unit', 'TEXT DEFAULT "وحدة"'),
-                ('price', 'REAL DEFAULT 0'),
-                ('description', 'TEXT DEFAULT ""'),
-                ('updated_at', 'TEXT DEFAULT ""')
-            ])
+                # جدول سجل التدقيق والمراجعة
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS logs (
+                        id TEXT PRIMARY KEY,
+                        timestamp TEXT NOT NULL,
+                        username TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        details TEXT NOT NULL,
+                        type TEXT NOT NULL
+                    )
+                ''')
 
-            ensure_columns('sales', [
-                ('invoice_number', 'TEXT DEFAULT ""'),
-                ('created_at', 'TEXT DEFAULT ""'),
-                ('customer_name', 'TEXT DEFAULT ""'),
-                ('customer_phone', 'TEXT DEFAULT ""'),
-                ('cashier_id', 'TEXT DEFAULT ""'),
-                ('cashier_name', 'TEXT DEFAULT ""'),
-                ('subtotal', 'REAL DEFAULT 0'),
-                ('discount', 'REAL DEFAULT 0'),
-                ('tax', 'REAL DEFAULT 0'),
-                ('total', 'REAL DEFAULT 0'),
-                ('payment_method', 'TEXT DEFAULT "CASH"'),
-                ('items_json', 'TEXT DEFAULT "[]"'),
-                ('notes', 'TEXT DEFAULT ""')
-            ])
+                # جدول حركات المخزون (تعديل، توريد، صرف، فواتير)
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS movements (
+                        id TEXT PRIMARY KEY,
+                        reference_no TEXT,
+                        product_id TEXT NOT NULL,
+                        product_code TEXT,
+                        product_name TEXT,
+                        type TEXT NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        previous_stock INTEGER,
+                        new_stock INTEGER,
+                        reason TEXT,
+                        operator_name TEXT,
+                        created_at TEXT
+                    )
+                ''')
+                
+                # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) ---
+                def ensure_columns(table_name, columns_to_check):
+                    try:
+                        cursor.execute(f"PRAGMA table_info({table_name})")
+                        existing = [r[1] for r in cursor.fetchall()]
+                        for col_name, col_def in columns_to_check:
+                            if col_name not in existing:
+                                try:
+                                    cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def};")
+                                except Exception as ex:
+                                    print(f"Migration: add {col_name} to {table_name}:", ex)
+                    except Exception as e:
+                        print(f"Schema check error on {table_name}:", e)
 
-            # --- فحص وإدخال البيانات الرسمية (82 صنف) فقط إذا كانت قاعدة البيانات فارغة تماماً ---
-            cursor.execute("SELECT COUNT(*) FROM products")
-            total_prods = cursor.fetchone()[0]
+                ensure_columns('movements', [
+                    ('reference_no', 'TEXT DEFAULT ""'),
+                    ('product_id', 'TEXT DEFAULT ""'),
+                    ('product_code', 'TEXT DEFAULT ""'),
+                    ('product_name', 'TEXT DEFAULT ""'),
+                    ('type', 'TEXT DEFAULT "OUT"'),
+                    ('quantity', 'INTEGER DEFAULT 1'),
+                    ('previous_stock', 'INTEGER DEFAULT 0'),
+                    ('new_stock', 'INTEGER DEFAULT 0'),
+                    ('reason', 'TEXT DEFAULT ""'),
+                    ('operator_name', 'TEXT DEFAULT "أمين المخزن"'),
+                    ('created_at', 'TEXT DEFAULT ""')
+                ])
 
-            if total_prods == 0:
-                print("🔄 SQLite Initialization: Inserting 82 official seed items...")
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                official_seed_groups = [
-                    ("سوق 21 أجهزة بركانية", [
-                        "شواية لحم",
-                        "ثلاجة حلويات",
-                        "ماكينة شاورما كهرباء",
-                        "مضارب",
-                        "آيس ميكر"
-                    ]),
-                    ("عام", [
-                        "طاولة السندوتش",
-                        "صواني قرص",
-                        "ميزان ساعة",
-                        "شواية مشكل",
-                        "حوضات",
-                        "ديسبنسر",
-                        "صحن السندوتش",
-                        "كرتونة زجاج",
-                        "شيخ الشواية",
-                        "فرامة أكياس + أخشاب",
-                        "شاورما دجاج",
-                        "غلاية لتر",
-                        "مبرد عصير",
-                        "منشر لحوم",
-                        "غلاية لتر كهرباء",
-                        "شواية عرض السندوتش",
-                        "بسكيت سمك",
-                        "شواية فراخ",
-                        "كرتونة صواني",
-                        "غلاية غاز",
-                        "قاطع سيخ شتراك صغير",
-                        "عصارة برتقال"
-                    ]),
-                    ("الأجهزة", [
-                        "طاولة السندوتش",
-                        "طباخة 2 شعلة فول",
-                        "م. السندوتش مرضى",
-                        "ماكينة بطاطس",
-                        "مبرد غاز",
-                        "فريزر هاير جديد",
-                        "ماكينة سمك",
-                        "شواية فراخ دوار",
-                        "غلاية لتر كهرباء",
-                        "ماكينة بروست ضغط",
-                        "صندل في مكان نائي يصعب الوصول إليه"
-                    ]),
-                    ("المخزن الشروق", [
-                        "شوايه فحم",
-                        "شاورما دبل",
-                        "غلايه غاز",
-                        "سخانات بروست أحمر",
-                        "فرن طبقة غاز",
-                        "مضرب نابوليتان",
-                        "بوفيه",
-                        "قلاب لحوم",
-                        "مسخنات بروست",
-                        "توستر",
-                        "كرتونه تقطيع بطاطس",
-                        "كرتونه ثلج",
-                        "قلايه 2 عين غاز",
-                        "وافل مدور + مربع",
-                        "ايس ميكر كيلو",
-                        "منشار لحمه",
-                        "كسارة ثلج",
-                        "ماكينه كاشير",
-                        "بروست",
-                        "فرن طابق",
-                        "شوايه لحم",
-                        "غلايه كهرباء لتر"
-                    ]),
-                    ("مخزن العمدة غرب", [
-                        "حوض عين",
-                        "راس شاورما",
-                        "ثلاجة حلويات",
-                        "شواية فحم",
-                        "ثلاجة عرض السندوتش",
-                        "مفرمة",
-                        "سخان بروست",
-                        "كابتشينو",
-                        "خلاط لتر",
-                        "سخانة منزلية",
-                        "مسن بروست",
-                        "مفرمة لحم",
-                        "خلاط لتر ك",
-                        "كسارة ثلج",
-                        "كبسة دبل مفرد",
-                        "قلاية مفرد غاز",
-                        "كبس سمك",
-                        "سخان ماء بويلر",
-                        "ماكينة تتبيل بروست",
-                        "كرتونة صحون",
-                        "وافل مربع",
-                        "فرن مدور"
-                    ])
-                ]
+                ensure_columns('products', [
+                    ('code', 'TEXT DEFAULT ""'),
+                    ('name', 'TEXT DEFAULT ""'),
+                    ('category', 'TEXT DEFAULT "عام"'),
+                    ('stock', 'INTEGER DEFAULT 0'),
+                    ('min_stock', 'INTEGER DEFAULT 5'),
+                    ('unit', 'TEXT DEFAULT "وحدة"'),
+                    ('price', 'REAL DEFAULT 0.0'),
+                    ('unit_price', 'REAL DEFAULT 0.0'),
+                    ('description', 'TEXT DEFAULT ""'),
+                    ('updated_at', 'TEXT DEFAULT ""')
+                ])
 
-                seq_counter = 1
-                for grp_cat, grp_items in official_seed_groups:
-                    for grp_name in grp_items:
-                        p_code = f"NASSER-{100 + seq_counter}"
-                        cursor.execute('''
-                            INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
-                        
-                        row_id = cursor.lastrowid
-                        m_id = f"mvt_init_{row_id}"
-                        cursor.execute('''
-                            INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (m_id, 'OPENING-INIT', str(row_id), p_code, grp_name.strip(), 'IN', 10, 0, 10, 'رصيد افتتاحي رسمي مسجل بالمستودع', 'المدير العام', now_iso))
-                        seq_counter += 1
+                # تنظيف أي قيم خالية في أسعار الأصناف لضمان استقرار العمليات الحسابية
+                try:
+                    cursor.execute("UPDATE products SET price = 0.0 WHERE price IS NULL")
+                    cursor.execute("UPDATE products SET unit_price = price WHERE unit_price IS NULL OR unit_price = 0.0")
+                except Exception:
+                    pass
 
-            # تعبئة حسابات المستخدمين إذا كانت فارغة
-            cursor.execute("SELECT COUNT(*) FROM users")
-            if cursor.fetchone()[0] == 0:
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                cursor.execute(
-                    "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    ('usr_1', 'admin', 'admin123', 'المدير العام - ناصر', 'GENERAL_MANAGER', 'zenithbabiker@gmail.com', now_iso)
-                )
-                cursor.execute(
-                    "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    ('usr_2', 'wh_manager', 'wh123', 'أمين المخزن الرئيسي - أحمد مصطفى', 'WAREHOUSE_MANAGER', 'warehouse.nasser@gmail.com', now_iso)
-                )
+                ensure_columns('sales', [
+                    ('invoice_number', 'TEXT DEFAULT ""'),
+                    ('created_at', 'TEXT DEFAULT ""'),
+                    ('customer_name', 'TEXT DEFAULT ""'),
+                    ('customer_phone', 'TEXT DEFAULT ""'),
+                    ('cashier_id', 'TEXT DEFAULT ""'),
+                    ('cashier_name', 'TEXT DEFAULT ""'),
+                    ('subtotal', 'REAL DEFAULT 0'),
+                    ('discount', 'REAL DEFAULT 0'),
+                    ('tax', 'REAL DEFAULT 0'),
+                    ('total', 'REAL DEFAULT 0'),
+                    ('payment_method', 'TEXT DEFAULT "CASH"'),
+                    ('items_json', 'TEXT DEFAULT "[]"'),
+                    ('notes', 'TEXT DEFAULT ""')
+                ])
 
-            commit_and_sync(conn)
-        finally:
-            conn.close()
+                # --- فحص وإدخال البيانات الرسمية (82 صنف) فقط إذا كانت قاعدة البيانات فارغة تماماً ---
+                cursor.execute("SELECT COUNT(*) FROM products")
+                total_prods = cursor.fetchone()[0]
+
+                if total_prods == 0:
+                    print("🔄 SQLite Initialization: Inserting 82 official seed items...")
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    official_seed_groups = [
+                        ("سوق 21 أجهزة بركانية", [
+                            "شواية لحم",
+                            "ثلاجة حلويات",
+                            "ماكينة شاورما كهرباء",
+                            "مضارب",
+                            "آيس ميكر"
+                        ]),
+                        ("عام", [
+                            "طاولة السندوتش",
+                            "صواني قرص",
+                            "ميزان ساعة",
+                            "شواية مشكل",
+                            "حوضات",
+                            "ديسبنسر",
+                            "صحن السندوتش",
+                            "كرتونة زجاج",
+                            "شيخ الشواية",
+                            "فرامة أكياس + أخشاب",
+                            "شاورما دجاج",
+                            "غلاية لتر",
+                            "مبرد عصير",
+                            "منشر لحوم",
+                            "غلاية لتر كهرباء",
+                            "شواية عرض السندوتش",
+                            "بسكيت سمك",
+                            "شواية فراخ",
+                            "كرتونة صواني",
+                            "غلاية غاز",
+                            "قاطع سيخ شتراك صغير",
+                            "عصارة برتقال"
+                        ]),
+                        ("الأجهزة", [
+                            "طاولة السندوتش",
+                            "طباخة 2 شعلة فول",
+                            "م. السندوتش مرضى",
+                            "ماكينة بطاطس",
+                            "مبرد غاز",
+                            "فريزر هاير جديد",
+                            "ماكينة سمك",
+                            "شواية فراخ دوار",
+                            "غلاية لتر كهرباء",
+                            "ماكينة بروست ضغط",
+                            "صندل في مكان نائي يصعب الوصول إليه"
+                        ]),
+                        ("المخزن الشروق", [
+                            "شوايه فحم",
+                            "شاورما دبل",
+                            "غلايه غاز",
+                            "سخانات بروست أحمر",
+                            "فرن طبقة غاز",
+                            "مضرب نابوليتان",
+                            "بوفيه",
+                            "قلاب لحوم",
+                            "مسخنات بروست",
+                            "توستر",
+                            "كرتونه تقطيع بطاطس",
+                            "كرتونه ثلج",
+                            "قلايه 2 عين غاز",
+                            "وافل مدور + مربع",
+                            "ايس ميكر كيلو",
+                            "منشار لحمه",
+                            "كسارة ثلج",
+                            "ماكينه كاشير",
+                            "بروست",
+                            "فرن طابق",
+                            "شوايه لحم",
+                            "غلايه كهرباء لتر"
+                        ]),
+                        ("مخزن العمدة غرب", [
+                            "حوض عين",
+                            "راس شاورما",
+                            "ثلاجة حلويات",
+                            "شواية فحم",
+                            "ثلاجة عرض السندوتش",
+                            "مفرمة",
+                            "سخان بروست",
+                            "كابتشينو",
+                            "خلاط لتر",
+                            "سخانة منزلية",
+                            "مسن بروست",
+                            "مفرمة لحم",
+                            "خلاط لتر ك",
+                            "كسارة ثلج",
+                            "كبسة دبل مفرد",
+                            "قلاية مفرد غاز",
+                            "كبس سمك",
+                            "سخان ماء بويلر",
+                            "ماكينة تتبيل بروست",
+                            "كرتونة صحون",
+                            "وافل مربع",
+                            "فرن مدور"
+                        ])
+                    ]
+
+                    seq_counter = 1
+                    for grp_cat, grp_items in official_seed_groups:
+                        for grp_name in grp_items:
+                            p_code = f"NASSER-{100 + seq_counter}"
+                            cursor.execute('''
+                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
+                            
+                            row_id = cursor.lastrowid
+                            m_id = f"mvt_init_{row_id}"
+                            cursor.execute('''
+                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (m_id, 'OPENING-INIT', str(row_id), p_code, grp_name.strip(), 'IN', 10, 0, 10, 'رصيد افتتاحي رسمي مسجل بالمستودع', 'المدير العام', now_iso))
+                            seq_counter += 1
+
+                # تعبئة حسابات المستخدمين إذا كانت فارغة
+                cursor.execute("SELECT COUNT(*) FROM users")
+                if cursor.fetchone()[0] == 0:
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    cursor.execute(
+                        "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        ('usr_1', 'admin', 'admin123', 'المدير العام - ناصر', 'GENERAL_MANAGER', 'zenithbabiker@gmail.com', now_iso)
+                    )
+                    cursor.execute(
+                        "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        ('usr_2', 'wh_manager', 'wh123', 'أمين المخزن الرئيسي - أحمد مصطفى', 'WAREHOUSE_MANAGER', 'warehouse.nasser@gmail.com', now_iso)
+                    )
+
+                commit_and_sync(conn)
+                break
+            except sqlite3.OperationalError as oe:
+                if "locked" in str(oe).lower() and attempt < 4:
+                    time.sleep(0.5)
+                    continue
+                raise oe
+            except Exception as e:
+                if attempt < 4:
+                    time.sleep(0.5)
+                    continue
+                raise e
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
 
 # ذاكرة مؤقتة لرموز OTP
 ACTIVE_OTPS = {}
@@ -1184,12 +1232,12 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     data = self._read_json_body()
                     items = data.get('items', [])
                     ref_no = data.get('referenceNo', '1')
-                    reason_str = data.get('reason', 'فاتورة مبيعات')
+                    reason_str = data.get('reason', 'أمر تسليم مخزن')
                     op_name = data.get('operatorName') or 'أمين المخزن'
                     now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
 
                     if not items:
-                        return self._send_json({"success": False, "message": "لا توجد أصناف في الفاتورة"}, 400)
+                        return self._send_json({"success": False, "message": "لا توجد أصناف في أمر التسليم"}, 400)
 
                     created_movements = []
                     with DB_LOCK:
@@ -1199,39 +1247,49 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                             # مرحلة التحقق أولاً: التأكد من توفر الرصيد لجميع الأصناف
                             for idx, itm in enumerate(items):
-                                p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
+                                p_id_key = str(itm.get('productId') or '').strip()
+                                p_code_key = str(itm.get('productCode') or itm.get('code') or '').strip()
+                                p_name_key = str(itm.get('productName') or itm.get('name') or '').strip()
                                 try:
                                     qty = max(1, int(itm.get('quantity', 1)))
                                 except Exception:
                                     qty = 1
                                 
-                                p_row = self._find_product(cursor, p_id_key)
-                                if not p_row and itm.get('productCode'):
-                                    p_row = self._find_product(cursor, itm.get('productCode'))
-                                if not p_row and itm.get('productName'):
-                                    p_row = self._find_product(cursor, itm.get('productName'))
+                                p_row = None
+                                if p_id_key:
+                                    p_row = self._find_product(cursor, p_id_key)
+                                if not p_row and p_code_key:
+                                    p_row = self._find_product(cursor, p_code_key)
+                                if not p_row and p_name_key:
+                                    p_row = self._find_product(cursor, p_name_key)
 
                                 if not p_row:
-                                    label = itm.get('productName') or itm.get('productCode') or p_id_key or f"بند {idx+1}"
+                                    label = p_name_key or p_code_key or p_id_key or f"بند {idx+1}"
                                     return self._send_json({"success": False, "message": f"الصنف ({label}) غير موجود بالمخزن"}, 404)
-                                if int(p_row[3]) < qty:
-                                    return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {p_row[3]} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
+                                
+                                available_stock = int(p_row[3]) if p_row[3] is not None else 0
+                                if available_stock < qty:
+                                    return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {available_stock} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
 
                             # مرحلة التنفيذ الذري: خصم الكميات وتسجيل الحركات دفعة واحدة
                             for idx, itm in enumerate(items):
-                                p_id_key = str(itm.get('productId') or itm.get('productCode') or itm.get('code') or itm.get('productName') or itm.get('name') or '').strip()
+                                p_id_key = str(itm.get('productId') or '').strip()
+                                p_code_key = str(itm.get('productCode') or itm.get('code') or '').strip()
+                                p_name_key = str(itm.get('productName') or itm.get('name') or '').strip()
                                 try:
                                     qty = max(1, int(itm.get('quantity', 1)))
                                 except Exception:
                                     qty = 1
 
-                                p_row = self._find_product(cursor, p_id_key)
-                                if not p_row and itm.get('productCode'):
-                                    p_row = self._find_product(cursor, itm.get('productCode'))
-                                if not p_row and itm.get('productName'):
-                                    p_row = self._find_product(cursor, itm.get('productName'))
+                                p_row = None
+                                if p_id_key:
+                                    p_row = self._find_product(cursor, p_id_key)
+                                if not p_row and p_code_key:
+                                    p_row = self._find_product(cursor, p_code_key)
+                                if not p_row and p_name_key:
+                                    p_row = self._find_product(cursor, p_name_key)
 
-                                actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3])
+                                actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3] if p_row[3] is not None else 0)
                                 new_stock = max(0, prev_stock - qty)
 
                                 cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
@@ -1261,8 +1319,8 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         finally:
                             conn.close()
 
-                    add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'صرف فاتورة مبيعات (دفعة واحدة)', f"تم صرف وتوثيق عدد ({len(created_movements)}) أصناف بموجب فاتورة رقم [{ref_no}] بنجاح", 'MOVEMENT')
-                    return self._send_json({"success": True, "movements": created_movements, "message": f"تم صرف وتوثيق الفاتورة رقم [{ref_no}] بنجاح"})
+                    add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'صرف أمر تسليم مخزن (دفعة واحدة)', f"تم صرف وتوثيق عدد ({len(created_movements)}) أصناف بموجب أمر تسليم رقم [{ref_no}] بنجاح", 'MOVEMENT')
+                    return self._send_json({"success": True, "movements": created_movements, "message": f"تم صرف وتوثيق أمر التسليم رقم [{ref_no}] بنجاح"})
                 except Exception as e:
                     return self._send_json({"success": False, "message": str(e)}, 500)
 
@@ -1407,13 +1465,15 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         try:
                             cursor = conn.cursor()
                             row = self._find_product(cursor, p_id)
-                            actual_id = str(row[0]) if row else str(p_id)
-                            p_code = str(row[1]) if row else str(p_id)
-                            p_name = row[2] if row else p_id
+                            if not row:
+                                return self._send_json({"success": False, "message": "الصنف المطلوب حذفه غير موجود بالمخزن"}, 404)
                             
-                            cursor.execute("DELETE FROM products WHERE id=? OR code=?", (actual_id, p_code))
-                            if cursor.rowcount == 0:
-                                cursor.execute("DELETE FROM products WHERE id=? OR code=? OR name=?", (p_id, p_id, p_name))
+                            actual_id = str(row[0])
+                            p_code = str(row[1])
+                            p_name = str(row[2])
+                            
+                            # حذف محدد ودقيق بنسبة 100% باستخدام المعرف الفعلي (Primary Key ID) فقط لمنع أي مسح جماعي
+                            cursor.execute("DELETE FROM products WHERE id=?", (actual_id,))
                             cursor.execute("DELETE FROM movements WHERE product_id=? OR product_code=?", (actual_id, p_code))
                             commit_and_sync(conn)
                         finally:
@@ -1584,6 +1644,14 @@ try:
                     err_msg.setText(f"تعذر إتمام عملية الطباعة الداخلية:\n{pe}")
                     err_msg.setIcon(QMessageBox.Warning)
                     err_msg.exec()
+
+        def closeEvent(self, event):
+            """إجراء تفريغ نهائي لقاعدة البيانات وحفظ كافة التغييرات بأمان عند إغلاق النافذة"""
+            try:
+                flush_db_on_exit()
+            except Exception:
+                pass
+            event.accept()
 
 except ImportError:
     pass

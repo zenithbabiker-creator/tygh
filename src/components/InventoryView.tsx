@@ -71,15 +71,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [stock, setStock] = useState<string>('0');
-  const [price, setPrice] = useState<string>('0');
   const [minStock, setMinStock] = useState<string>('5');
 
   // Interactive Table Grid State for Excel Copy-Paste & Batch Add
-  const [gridRows, setGridRows] = useState<Array<{ id: string; code: string; name: string; stock: string; price: string }>>([]);
+  const [gridRows, setGridRows] = useState<Array<{ id: string; code: string; name: string; stock: string }>>([]);
   const [pasteMessage, setPasteMessage] = useState('');
 
-  // Side Cart for "الفاتورة"
-  const [cartItems, setCartItems] = useState<Array<{ product: Product; quantity: number; unitPrice: number }>>([]);
+  // Side Cart for "أمر تسليم مخزن"
+  const [cartItems, setCartItems] = useState<Array<{ product: Product; quantity: number }>>([]);
   const [recipientName, setRecipientName] = useState<string>('');
   const [activeDeliveryItems, setActiveDeliveryItems] = useState<DispatchItem[] | null>(null);
   const [activeDeliveryOrderNo, setActiveDeliveryOrderNo] = useState<string>('');
@@ -88,22 +87,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // Keyboard shortcut Ctrl + P handler to trigger invoice print with mandatory field validation
+  // Keyboard shortcut Ctrl + P handler to trigger delivery order print with mandatory field validation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-        // If the invoice modal is already open, let the modal handle it
+        // If the delivery order modal is already open, let the modal handle it
         if (activeDeliveryItems && activeDeliveryItems.length > 0) {
           return;
         }
 
         e.preventDefault();
         if (cartItems.length === 0) {
-          alert('💡 تنبيه: سلة الفاتورة فارغة حالياً.\n\nخطوات الطباعة:\n1. انقر على الصنف لإضافته إلى الفاتورة.\n2. اكتب "اسم المستلم / العميل".\n3. اضغط على زر "إصدار وطباعة الفاتورة" أو اختصار (Ctrl + P).');
+          alert('💡 تنبيه: سلة أمر التسليم فارغة حالياً.\n\nخطوات الطباعة:\n1. انقر على الصنف لإضافته إلى أمر التسليم.\n2. اكتب "اسم المستلم / جهة الاستلام".\n3. اضغط على زر "إصدار وطباعة أمر تسليم مخزن" أو اختصار (Ctrl + P).');
           return;
         }
         if (!recipientName.trim()) {
-          alert('⚠️ تنبيه هام: يرجى كتابة "اسم المستلم / العميل" في الحقل المخصص بالسلة قبل طباعة الفاتورة.');
+          alert('⚠️ تنبيه هام: يرجى كتابة "اسم المستلم / جهة الاستلام" في الحقل المخصص بالسلة قبل طباعة أمر التسليم.');
           return;
         }
         handleCompleteInvoice();
@@ -117,8 +116,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const metrics = useMemo(() => {
     const totalItems = products.length;
     const totalUnits = products.reduce((acc, p) => acc + p.stock, 0);
-    const totalValue = products.reduce((acc, p) => acc + (p.stock * (p.price || 0)), 0);
-    return { totalItems, totalUnits, totalValue };
+    const lowStockCount = products.filter(p => p.stock <= (p.minStock || 5)).length;
+    return { totalItems, totalUnits, lowStockCount };
   }, [products]);
 
   // Filter products using Arabic Smart Search Engine
@@ -126,26 +125,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return searchAndRank(products, searchTerm, (p: Product) => [p.name, p.code]);
   }, [products, searchTerm]);
 
-  // Cart Calculations (Totals & Grand Total)
+  // Cart Calculations (Totals)
   const cartTotals = useMemo(() => {
     const totalQuantity = cartItems.reduce((acc, item) => acc + item.quantity, 0);
-    const grandTotal = cartItems.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
     return {
       totalItems: cartItems.length,
       totalQuantity,
-      grandTotal,
     };
   }, [cartItems]);
 
-  // Direct Click-to-Add to Side Invoice Cart
+  // Direct Click-to-Add to Side Delivery Order Cart
   const handleToggleProductCart = (product: Product) => {
     const liveProd = products.find(p => p.id === product.id) || product;
     if (liveProd.stock <= 0) {
       alert(`عفواً، الصنف (${liveProd.name}) غير متوفر بالمخزن حالياً (الرصيد المتاح: 0).`);
       return;
     }
-
-    const defaultPrice = typeof liveProd.price === 'number' ? liveProd.price : 0;
 
     setCartItems(prev => {
       const existing = prev.find(item => item.product.id === product.id);
@@ -160,7 +155,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             : item
         );
       } else {
-        return [...prev, { product: liveProd, quantity: 1, unitPrice: defaultPrice }];
+        return [...prev, { product: liveProd, quantity: 1 }];
       }
     });
   };
@@ -182,17 +177,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       prev.map(item =>
         item.product.id === productId
           ? { ...item, quantity: newQty, product: liveProd || item.product }
-          : item
-      )
-    );
-  };
-
-  const handleUpdateCartPrice = (productId: string, newPrice: number) => {
-    const validPrice = Math.max(0, isNaN(newPrice) ? 0 : newPrice);
-    setCartItems(prev =>
-      prev.map(item =>
-        item.product.id === productId
-          ? { ...item, unitPrice: validPrice }
           : item
       )
     );
@@ -248,14 +232,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return String(maxSeq + 1);
   };
 
-  // Complete Order & Print Invoice Document
+  // Complete Order & Print Delivery Order Document
   const handleCompleteInvoice = async () => {
     if (!cartItems || cartItems.length === 0) {
-      alert('💡 تنبيه: سلة الفاتورة فارغة حالياً. يرجى اختيار الأصناف أولاً.');
+      alert('💡 تنبيه: سلة أمر التسليم فارغة حالياً. يرجى اختيار الأصناف أولاً.');
       return;
     }
     if (!recipientName.trim()) {
-      alert('تنبيه هام: يرجى كتابة اسم المستلم / العميل قبل طباعة الفاتورة.');
+      alert('تنبيه هام: يرجى كتابة اسم المستلم / جهة الاستلام قبل طباعة أمر التسليم.');
       return;
     }
 
@@ -270,7 +254,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       const requestedQty = Math.max(1, Number(item.quantity) || 1);
 
       if (available <= 0) {
-        alert(`خطأ في العملية: الصنف (${item.product.name}) غير متوفر بالمخزن (الرصيد: 0). يرجى إزالته من الفاتورة.`);
+        alert(`خطأ في العملية: الصنف (${item.product.name}) غير متوفر بالمخزن (الرصيد: 0). يرجى إزالته من أمر التسليم.`);
         return;
       }
       if (requestedQty > available) {
@@ -285,7 +269,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     try {
       const finalOrderNo = getNextInvoiceNo();
 
-      // Persist generated invoice sequence number immediately
+      // Persist generated delivery order sequence number immediately
       const numVal = parseInt(finalOrderNo, 10);
       if (!isNaN(numVal)) {
         try {
@@ -304,13 +288,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           (p.code && item.product.code && p.code === item.product.code) ||
           p.name === item.product.name
         ) || item.product;
-        const uPrice = Number(item.unitPrice ?? liveProd.price ?? item.product.price ?? 0);
         const qty = Math.max(1, Number(item.quantity) || 1);
         return {
           product: liveProd,
           quantity: qty,
-          unitPrice: uPrice,
-          totalPrice: qty * uPrice,
         };
       });
 
@@ -326,7 +307,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           productCode: String(liveProd.code || item.product.code || ''),
           productName: String(liveProd.name || item.product.name || ''),
           quantity: Math.max(1, Number(item.quantity) || 1),
-          unitPrice: Number(item.unitPrice ?? liveProd.price ?? item.product.price ?? 0),
         };
       });
 
@@ -335,11 +315,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         const res = await onBatchStockMovement({
           items: batchItemsPayload,
           referenceNo: finalOrderNo,
-          reason: `فاتورة مبيعات - المستلم/العميل: ${recipientName.trim()}`,
+          reason: `أمر تسليم مخزن - المستلم/الجهة: ${recipientName.trim()}`,
         });
 
         if (res && res.success === false) {
-          const errMsg = res.message || 'فشلت عملية صرف الفاتورة، يرجى مراجعة البيانات';
+          const errMsg = res.message || 'فشلت عملية صرف أمر التسليم، يرجى مراجعة البيانات';
           setFormError(errMsg);
           return;
         }
@@ -352,12 +332,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             productName: item.productName,
             type: 'OUT',
             quantity: item.quantity,
-            reason: `فاتورة مبيعات - المستلم/العميل: ${recipientName.trim()}`,
+            reason: `أمر تسليم مخزن - المستلم/الجهة: ${recipientName.trim()}`,
             referenceNo: finalOrderNo,
           });
 
           if (res && res.success === false) {
-            const errMsg = res.message || 'فشلت عملية صرف الصنف بالفاتورة';
+            const errMsg = res.message || 'فشلت عملية صرف الصنف بأمر التسليم';
             setFormError(errMsg);
             return;
           }
@@ -373,8 +353,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       setCartItems([]);
       setRecipientName('');
     } catch (err: any) {
-      console.error('Invoice execution error:', err);
-      setFormError('حدث خطأ أثناء معالجة الفاتورة');
+      console.error('Delivery order execution error:', err);
+      setFormError('حدث خطأ أثناء معالجة أمر التسليم');
     } finally {
       setIsSubmitting(false);
     }
@@ -387,17 +367,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         e.preventDefault();
         e.stopPropagation();
 
-        // If invoice delivery preview modal is already open, let DeliveryOrderModal handle it
+        // If delivery order preview modal is already open, let DeliveryOrderModal handle it
         if (activeDeliveryItems && activeDeliveryItems.length > 0) {
           window.focus();
           window.print();
           return;
         }
 
-        // If items are present in invoice cart, complete and issue the invoice immediately
+        // If items are present in cart, complete and issue the delivery order immediately
         if (cartItems.length > 0) {
           if (!recipientName.trim()) {
-            setRecipientName('عميل نقدي / مبيعات مباشرة');
+            setRecipientName('تسليم مخزني مباشر');
           }
           handleCompleteInvoice();
           return;
@@ -442,7 +422,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setCode(generateNextCode());
     setName('');
     setStock('1');
-    setPrice('0');
     setMinStock('5');
     setFormError('');
     setIsModalOpen(true);
@@ -464,11 +443,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     });
 
     const initialFive = Array.from({ length: 5 }, (_, i) => ({
-      id: `row_${Date.now()}_${i}`,
+      id: `init_${Date.now()}_${i}`,
       code: `NASSER-${startingNum + 1 + i}`,
       name: '',
       stock: '1',
-      price: '0',
     }));
     setGridRows(initialFive);
     setPasteMessage('');
@@ -502,7 +480,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       }
     });
 
-    const parsedRows: Array<{ id: string; code: string; name: string; stock: string; price: string }> = [];
+    const parsedRows: Array<{ id: string; code: string; name: string; stock: string }> = [];
 
     lines.forEach((line) => {
       // Split by tab (Excel copy), comma, or multiple spaces
@@ -520,7 +498,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       let parsedCode = `NASSER-${baseNum}`;
       let parsedName = '';
       let parsedStock = '1';
-      let parsedPrice = '0';
 
       if (cleanParts.length === 1) {
         parsedName = cleanParts[0];
@@ -533,23 +510,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           parsedCode = cleanParts[0].startsWith('NASSER-') ? cleanParts[0] : `NASSER-${cleanParts[0]}`;
           parsedName = cleanParts[1];
         }
-      } else if (cleanParts.length === 3) {
-        // [Name, Quantity, Price] OR [Code, Name, Quantity]
-        if (!isNaN(Number(cleanParts[1])) && !isNaN(Number(cleanParts[2]))) {
+      } else if (cleanParts.length >= 3) {
+        // [Name, Quantity, ...] OR [Code, Name, Quantity]
+        if (!isNaN(Number(cleanParts[1]))) {
           parsedName = cleanParts[0];
           parsedStock = String(Math.max(0, parseInt(cleanParts[1], 10) || 1));
-          parsedPrice = String(Math.max(0, parseFloat(cleanParts[2]) || 0));
         } else {
           parsedCode = cleanParts[0].startsWith('NASSER-') ? cleanParts[0] : `NASSER-${cleanParts[0]}`;
           parsedName = cleanParts[1];
           parsedStock = String(Math.max(0, parseInt(cleanParts[2], 10) || 1));
         }
-      } else if (cleanParts.length >= 4) {
-        // [Code, Name, Quantity, Price]
-        parsedCode = cleanParts[0].startsWith('NASSER-') ? cleanParts[0] : `NASSER-${cleanParts[0]}`;
-        parsedName = cleanParts[1];
-        parsedStock = String(Math.max(0, parseInt(cleanParts[2], 10) || 1));
-        parsedPrice = String(Math.max(0, parseFloat(cleanParts[3]) || 0));
       }
 
       if (parsedName) {
@@ -558,7 +528,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           code: parsedCode,
           name: parsedName,
           stock: parsedStock,
-          price: parsedPrice,
         });
       }
     });
@@ -592,21 +561,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }
       });
 
-      const newFive: Array<{ id: string; code: string; name: string; stock: string; price: string }> = [];
+      const newFive: Array<{ id: string; code: string; name: string; stock: string }> = [];
       for (let i = 1; i <= 5; i++) {
         newFive.push({
           id: `row_${Date.now()}_${Math.random().toString(36).substring(2, 5)}_${i}`,
           code: `NASSER-${maxNum + i}`,
           name: '',
           stock: '1',
-          price: '0',
         });
       }
       return [...prev, ...newFive];
     });
   };
 
-  const handleGridCellChange = (id: string, field: 'code' | 'name' | 'stock' | 'price', value: string) => {
+  const handleGridCellChange = (id: string, field: 'code' | 'name' | 'stock', value: string) => {
     setGridRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
   };
 
@@ -638,7 +606,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           code: finalCode,
           name: r.name.trim(),
           stock: parseInt(r.stock, 10) || 0,
-          price: parseFloat(r.price) || 0,
           category: 'عام',
           minStock: 5,
           unit: 'وحدة',
@@ -677,7 +644,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setCode(product.code);
     setName(product.name);
     setStock(String(product.stock));
-    setPrice(String(product.price || 0));
     setMinStock(String(product.minStock || 5));
     setFormError('');
     setIsModalOpen(true);
@@ -711,7 +677,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           code: formattedCode || editingProduct.code,
           name: name.trim(),
           stock: Math.max(0, parseInt(stock, 10) || 0),
-          price: Math.max(0, parseFloat(price) || 0),
           minStock: Math.max(1, parseInt(minStock, 10) || 5),
           category: editingProduct.category || 'عام',
           unit: editingProduct.unit || 'وحدة',
@@ -728,7 +693,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           name: name.trim(),
           category: 'عام',
           stock: Math.max(0, parseInt(stock, 10) || 0),
-          price: Math.max(0, parseFloat(price) || 0),
           minStock: Math.max(1, parseInt(minStock, 10) || 5),
           unit: 'وحدة',
           description: '',
@@ -853,14 +817,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3.5 w-44 sm:w-52">الكود / Serial Number (تلقائي ومحمي)</th>
                     <th className="p-3.5">اسم الصنف بالكامل</th>
                     <th className="p-3.5 w-32 sm:w-40 text-center">العدد / الكمية</th>
-                    <th className="p-3.5 w-32 sm:w-40 text-center">سعر الصنف (الوحدة)</th>
                     <th className="p-3.5 w-16 text-center">حذف</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
                   {gridRows.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-12 text-center text-slate-400 font-bold">
+                      <td colSpan={5} className="p-12 text-center text-slate-400 font-bold">
                         لا توجد أصناف بالجدول. اضغط إضافة صفوف جديدة أو قم باللصق من Excel.
                       </td>
                     </tr>
@@ -895,17 +858,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             value={row.stock}
                             onChange={(e) => handleGridCellChange(row.id, 'stock', e.target.value)}
                             placeholder="1"
-                            className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono font-black text-slate-900 text-center text-xs sm:text-sm focus:border-blue-600 focus:ring-1 focus:ring-blue-500 focus:outline-none shadow-xs"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="number"
-                            min="0"
-                            step="any"
-                            value={row.price}
-                            onChange={(e) => handleGridCellChange(row.id, 'price', e.target.value)}
-                            placeholder="0"
                             className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono font-black text-slate-900 text-center text-xs sm:text-sm focus:border-blue-600 focus:ring-1 focus:ring-blue-500 focus:outline-none shadow-xs"
                           />
                         </td>
@@ -968,10 +920,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm no-print">
         <div className="space-y-1">
           <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight font-['Tajawal']">
-            إدارة المخزن والمبيعات وإصدار الفواتير
+            إدارة المخزن وأوامر تسليم المخزن
           </h2>
           <p className="text-xs text-slate-500 font-semibold">
-            نظام متكامل لإدارة الأصناف، الأسعار، الحساب الآلي للإجمالي، والطباعة الفورية للفواتير
+            نظام متكامل لإدارة الأصناف والمخزون، وإصدار وطباعة أوامر تسليم المخزن الفورية
           </p>
         </div>
 
@@ -1025,11 +977,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3.5">
           <div className="p-3 bg-amber-50 rounded-xl text-amber-600">
-            <DollarSign className="w-6 h-6" />
+            <AlertTriangle className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold">إجمالي القيمة التقديرية للمخزون</p>
-            <p className="text-lg font-black text-slate-900 font-mono">{toArabicNumerals(metrics.totalValue.toLocaleString())}</p>
+            <p className="text-xs text-slate-500 font-bold">أصناف تحتاج إعادة طلب (منخفضة)</p>
+            <p className="text-lg font-black text-amber-700 font-mono">{toArabicNumerals(metrics.lowStockCount)} صنف</p>
           </div>
         </div>
       </div>
@@ -1086,7 +1038,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   </span>
                   <span className="font-extrabold text-sm">{selProd.name}</span>
                   <span className="text-slate-500 font-normal">| الرصيد: {toArabicNumerals(selProd.stock)} {selProd.unit || 'وحدة'}</span>
-                  <span className="text-emerald-700 font-black font-mono">| {toArabicNumerals(Number(selProd.price || 0).toLocaleString())} د.ل</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -1099,7 +1050,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     }`}
                   >
                     <ShoppingCart className="w-3.5 h-3.5" />
-                    <span>{inCart ? 'موجود بالسلة' : 'إضافة للفاتورة'}</span>
+                    <span>{inCart ? 'موجود بالسلة' : 'إضافة لأمر التسليم'}</span>
                   </button>
                   {isGeneralManager && (
                     <>
@@ -1131,7 +1082,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <div className="p-3 bg-slate-900 text-white flex items-center justify-between">
               <span className="text-xs font-bold flex items-center gap-2">
                 <Boxes className="w-4 h-4 text-blue-400" />
-                <span>قائمة أصناف المخزن والأسعار (انقر لتحديد الصنف، أو اضغط زر السلة لإضافته للفاتورة)</span>
+                <span>قائمة أصناف المخزن (انقر لتحديد الصنف، أو اضغط زر السلة لإضافته لأمر التسليم)</span>
               </span>
               <span className="text-[11px] font-mono text-slate-300">
                 {toArabicNumerals(filteredProducts.length)} صنف
@@ -1145,7 +1096,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3.5 w-36 font-mono">كود الصنف (Item Code)</th>
                     <th className="p-3.5">اسم الصنف (Item Name)</th>
                     <th className="p-3.5 w-28 text-center bg-blue-50/70">عدد الصنف (الكمية)</th>
-                    <th className="p-3.5 w-28 text-center bg-emerald-50/70">سعر الصنف (الوحدة)</th>
                     <th className="p-3.5 w-24 text-center">إضافة للسلة</th>
                     {isGeneralManager && (
                       <th className="p-3.5 w-24 text-center">إجراءات</th>
@@ -1155,7 +1105,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredProducts.length === 0 ? (
                     <tr>
-                      <td colSpan={isGeneralManager ? 6 : 5} className="p-12 text-center text-slate-400">
+                      <td colSpan={isGeneralManager ? 5 : 4} className="p-12 text-center text-slate-400">
                         <Boxes className="w-12 h-12 mx-auto mb-3 opacity-30 text-blue-600" />
                         <p className="font-bold text-sm text-slate-700">لا توجد أصناف مخزنية تطابق البحث</p>
                       </td>
@@ -1188,7 +1138,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <td className="p-3.5">
                             <div className="flex items-center gap-2">
                               {inCart && (
-                                <span className="bg-emerald-600 text-white p-0.5 rounded-full shrink-0" title="موجود في الفاتورة">
+                                <span className="bg-emerald-600 text-white p-0.5 rounded-full shrink-0" title="موجود في أمر التسليم">
                                   <Check className="w-3 h-3" />
                                 </span>
                               )}
@@ -1205,11 +1155,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             </span>
                           </td>
 
-                          {/* Item Price */}
-                          <td className="p-3.5 text-center font-black font-mono text-sm sm:text-base bg-emerald-50/30 text-emerald-800">
-                            {toArabicNumerals(Number(product.price || 0).toLocaleString())}
-                          </td>
-
                           {/* Add to Cart Button */}
                           <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
                             <button
@@ -1220,7 +1165,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                   ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                                   : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
                               }`}
-                              title={inCart ? 'إزالة من السلة' : 'إضافة إلى سلة الفاتورة'}
+                              title={inCart ? 'إزالة من السلة' : 'إضافة إلى أمر التسليم'}
                             >
                               <ShoppingCart className="w-3.5 h-3.5" />
                               <span className="hidden sm:inline">{inCart ? 'بالسلة' : '+ سلة'}</span>
@@ -1267,7 +1212,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
         </div>
 
-        {/* SIDE PANEL: Invoice Cart Preview (1 col on Desktop) */}
+        {/* SIDE PANEL: Delivery Order Cart Preview (1 col on Desktop) */}
         <div className="lg:col-span-1 space-y-4">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden sticky top-6 flex flex-col min-h-[500px]">
             
@@ -1275,7 +1220,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <div className="p-4 bg-gradient-to-r from-blue-900 to-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-emerald-400" />
-                <h3 className="font-extrabold text-sm sm:text-base">معاينة الفاتورة</h3>
+                <h3 className="font-extrabold text-sm sm:text-base">سلة أمر تسليم المخزن</h3>
               </div>
               
               {cartItems.length > 0 && (
@@ -1305,15 +1250,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <ShoppingCart className="w-8 h-8 text-slate-300" />
                   </div>
                   <p className="font-extrabold text-xs text-slate-700 max-w-xs">
-                    سلة الفاتورة فارغة حالياً
+                    سلة أمر التسليم فارغة حالياً
                   </p>
                   <p className="text-[11px] text-slate-400 max-w-xs leading-relaxed">
-                    اضغط مباشرة على أي صنف من القائمة لإضافته فوراً إلى الفاتورة.
+                    اضغط مباشرة على أي صنف من القائمة لإضافته فوراً إلى أمر تسليم المخزن.
                   </p>
                 </div>
               ) : (
-                cartItems.map(({ product, quantity, unitPrice }, idx) => {
-                  const itemTotalPrice = quantity * unitPrice;
+                cartItems.map(({ product, quantity }, idx) => {
                   return (
                     <div
                       key={product.id}
@@ -1332,79 +1276,55 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <button
                           onClick={() => handleRemoveFromCart(product.id)}
                           className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                          title="حذف من الفاتورة"
+                          title="حذف من أمر التسليم"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
 
-                      {/* Quantity & Unit Price Inputs */}
-                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60">
-                        {/* Quantity */}
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-600 block mb-1">العدد (الكمية):</label>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateCartQuantity(product.id, quantity - 1)}
-                              className="w-6 h-6 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center text-slate-700 font-bold text-xs transition cursor-pointer"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
+                      {/* Quantity Input */}
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                        <span className="text-[11px] font-bold text-slate-600">العدد (الكمية المصروفة):</span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateCartQuantity(product.id, quantity - 1)}
+                            className="w-7 h-7 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center text-slate-700 font-bold text-xs transition cursor-pointer shadow-xs"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
 
-                            <input
-                              type="number"
-                              min="1"
-                              value={quantity || ''}
-                              onChange={(e) => {
-                                const raw = e.target.value;
-                                if (raw === '') {
-                                  handleUpdateCartQuantity(product.id, 0);
-                                } else {
-                                  const parsed = parseInt(raw, 10);
-                                  if (!isNaN(parsed) && parsed > 0) {
-                                    handleUpdateCartQuantity(product.id, parsed);
-                                  }
-                                }
-                              }}
-                              onBlur={() => {
-                                if (quantity <= 0) {
-                                  handleUpdateCartQuantity(product.id, 1);
-                                }
-                              }}
-                              className="w-12 px-1 py-0.5 bg-white border border-slate-300 rounded-lg font-mono font-black text-center text-xs focus:border-blue-600 focus:outline-none"
-                            />
-
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateCartQuantity(product.id, (quantity || 0) + 1)}
-                              className="w-6 h-6 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center text-slate-700 font-bold text-xs transition cursor-pointer"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Unit Price */}
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-600 block mb-1">سعر الوحدة:</label>
                           <input
                             type="number"
-                            min="0"
-                            step="any"
-                            value={unitPrice}
-                            onChange={(e) => handleUpdateCartPrice(product.id, parseFloat(e.target.value) || 0)}
-                            className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg font-mono font-black text-left text-xs focus:border-blue-600 focus:outline-none"
+                            min="1"
+                            value={quantity || ''}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              if (raw === '') {
+                                handleUpdateCartQuantity(product.id, 0);
+                              } else {
+                                const parsed = parseInt(raw, 10);
+                                if (!isNaN(parsed) && parsed > 0) {
+                                  handleUpdateCartQuantity(product.id, parsed);
+                                }
+                              }
+                            }}
+                            onBlur={() => {
+                              if (quantity <= 0) {
+                                handleUpdateCartQuantity(product.id, 1);
+                              }
+                            }}
+                            className="w-14 py-1 bg-white border border-slate-300 rounded-lg font-mono font-black text-center text-xs focus:border-blue-600 focus:outline-none shadow-inner"
                           />
-                        </div>
-                      </div>
 
-                      {/* Row Total Price */}
-                      <div className="flex items-center justify-between text-[11px] font-bold bg-white p-1.5 rounded-lg border border-slate-200">
-                        <span className="text-slate-600">السعر الإجمالي للصنف:</span>
-                        <span className="font-mono font-black text-emerald-700">
-                          {toArabicNumerals(itemTotalPrice.toLocaleString())}
-                        </span>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateCartQuantity(product.id, (quantity || 0) + 1)}
+                            className="w-7 h-7 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center text-slate-700 font-bold text-xs transition cursor-pointer shadow-xs"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1421,7 +1341,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
                       <FileText className="w-3.5 h-3.5 text-blue-600" />
-                      <span>رقم الفاتورة التسلسلي (تلقائي غير قابل للتعديل):</span>
+                      <span>رقم أمر التسليم التسلسلي (تلقائي ومحمي):</span>
                     </span>
                     <span className="text-[11px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-black">
                       تسلسلي رسمي
@@ -1440,13 +1360,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <div>
                   <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center gap-1">
                     <UserIcon className="w-3.5 h-3.5 text-blue-600" />
-                    <span>اسم المستلم / العميل (إجباري للطباعة):</span>
+                    <span>اسم المستلم / جهة الاستلام (إجباري للطباعة):</span>
                   </label>
                   <input
                     type="text"
                     value={recipientName}
                     onChange={(e) => setRecipientName(e.target.value)}
-                    placeholder="أدخل اسم العميل أو المستلم..."
+                    placeholder="أدخل اسم جهة الاستلام أو المستلم..."
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-none transition"
                   />
                 </div>
@@ -1455,24 +1375,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               {/* Totals Summary */}
               <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-1.5 text-xs font-bold">
                 <div className="flex items-center justify-between text-slate-600">
-                  <span>إجمالي البنود:</span>
+                  <span>إجمالي الأصناف بأمر التسليم:</span>
                   <strong className="text-blue-800 font-mono">{toArabicNumerals(cartTotals.totalItems)} صنف</strong>
                 </div>
-                <div className="flex items-center justify-between text-slate-600">
-                  <span>إجمالي الكميات / القطع:</span>
-                  <strong className="text-slate-800 font-mono">{toArabicNumerals(cartTotals.totalQuantity)} قطعة</strong>
-                </div>
                 <div className="flex items-center justify-between text-slate-900 pt-1.5 border-t border-slate-100 font-extrabold">
-                  <span className="text-sm">الإجمالي الكلي للفاتورة:</span>
+                  <span className="text-sm">إجمالي الكميات / القطع المصروفة:</span>
                   <span className="text-base text-emerald-700 font-mono font-black">
-                    {toArabicNumerals(cartTotals.grandTotal.toLocaleString())}
+                    {toArabicNumerals(cartTotals.totalQuantity)} قطعة
                   </span>
                 </div>
               </div>
 
               {!recipientName.trim() && cartItems.length > 0 && (
                 <p className="text-[11px] font-extrabold text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 text-center">
-                  ⚠️ يجب تعبئة اسم المستلم / العميل لتفعيل زر الطباعة
+                  ⚠️ يجب تعبئة اسم المستلم / جهة الاستلام لتفعيل زر الطباعة
                 </p>
               )}
 
@@ -1483,7 +1399,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-lg shadow-emerald-100 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Printer className="w-4 h-4" />
-                <span>{isSubmitting ? 'جاري التوليد...' : 'إصدار وطباعة الفاتورة (Ctrl + P)'}</span>
+                <span>{isSubmitting ? 'جاري التوليد...' : 'إصدار وطباعة أمر تسليم مخزن (Ctrl + P)'}</span>
               </button>
             </div>
 
@@ -1556,44 +1472,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد الافتتاحي بالمخزن *</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    required
-                    value={stock}
-                    onChange={(e) => setStock(e.target.value)}
-                    onBlur={() => {
-                      if (!stock.trim() || isNaN(parseInt(stock, 10)) || parseInt(stock, 10) < 0) {
-                        setStock('0');
-                      }
-                    }}
-                    placeholder="0"
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر الصنف (الوحدة) *</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    required
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    onBlur={() => {
-                      if (!price.trim() || isNaN(parseFloat(price)) || parseFloat(price) < 0) {
-                        setPrice('0');
-                      }
-                    }}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد الافتتاحي بالمخزن *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  required
+                  value={stock}
+                  onChange={(e) => setStock(e.target.value)}
+                  onBlur={() => {
+                    if (!stock.trim() || isNaN(parseInt(stock, 10)) || parseInt(stock, 10) < 0) {
+                      setStock('0');
+                    }
+                  }}
+                  placeholder="0"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none"
+                />
               </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
@@ -1621,7 +1516,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
-      {/* AUTOMATIC INVOICE PRINT PREVIEW MODAL */}
+      {/* AUTOMATIC DELIVERY ORDER PRINT PREVIEW MODAL */}
       <DeliveryOrderModal
         movement={null}
         items={activeDeliveryItems || undefined}
