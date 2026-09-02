@@ -230,8 +230,8 @@ def init_sqlite_db():
                         stock INTEGER NOT NULL DEFAULT 0,
                         min_stock INTEGER DEFAULT 5,
                         unit TEXT DEFAULT 'وحدة',
-                        price REAL NOT NULL DEFAULT 0.0,
-                        unit_price REAL NOT NULL DEFAULT 0.0,
+                        price REAL DEFAULT 0.0,
+                        unit_price REAL DEFAULT 0.0,
                         description TEXT DEFAULT '',
                         updated_at TEXT
                     )
@@ -472,9 +472,9 @@ def init_sqlite_db():
                         for grp_name in grp_items:
                             p_code = f"NASSER-{100 + seq_counter}"
                             cursor.execute('''
-                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
+                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, unit_price, description, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (p_code, grp_name.strip(), grp_cat, 10, 5, 'وحدة', 0.0, 0.0, f"صنف معتمد: {grp_name.strip()} - قسم {grp_cat}", now_iso))
                             
                             row_id = cursor.lastrowid
                             m_id = f"mvt_init_{row_id}"
@@ -1046,9 +1046,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                             # Insert using SQLite native AUTOINCREMENT for primary key
                             cursor.execute('''
-                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (code, name, category, stock_val, min_stock, unit, price_val, desc, now_iso))
+                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, unit_price, description, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (code, name, category, stock_val, min_stock, unit, price_val, price_val, desc, now_iso))
                             
                             new_id = str(cursor.lastrowid)
 
@@ -1125,9 +1125,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                 p_min = max(1, int(itm.get('minStock') or 5))
 
                                 cursor.execute('''
-                                    INSERT INTO products (code, name, category, stock, min_stock, unit, price, description, updated_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso))
+                                    INSERT INTO products (code, name, category, stock, min_stock, unit, price, unit_price, description, updated_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso))
                                 
                                 p_id = str(cursor.lastrowid)
 
@@ -1432,15 +1432,15 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             p_desc = data.get('description') or ''
 
                             cursor.execute('''
-                                UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
+                                UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, unit_price=?, description=?, updated_at=?
                                 WHERE id=? OR code=?
-                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, actual_id, actual_id))
+                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso, actual_id, actual_id))
                             
                             if cursor.rowcount == 0:
                                 cursor.execute('''
-                                    UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, description=?, updated_at=?
+                                    UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, unit_price=?, description=?, updated_at=?
                                     WHERE id=? OR code=? OR name=?
-                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_desc, now_iso, p_id, p_id, p_name))
+                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso, p_id, p_id, p_name))
 
                             commit_and_sync(conn)
                         finally:
