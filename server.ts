@@ -850,40 +850,28 @@ app.delete('/api/products/:id', (req, res) => {
   res.json({ success: true, message: 'تم حذف الصنف من قاعدة البيانات بنجاح' });
 });
 
-// Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, strict formatted code, or exact name)
+// Helper for resilient product lookup (strictly isolates primary key ID, exact code, and name)
 function findProductInList(products: Product[], idOrCodeOrName: string): Product | undefined {
   if (!idOrCodeOrName) return undefined;
   const cleanKey = String(idOrCodeOrName).trim();
   if (!cleanKey || ['none', 'null', 'undefined'].includes(cleanKey.toLowerCase())) return undefined;
 
+  // 1. Exact match on unique product ID
+  const idMatch = products.find(p => String(p.id) === cleanKey);
+  if (idMatch) return idMatch;
+
+  // 2. Exact match on product code
+  const codeMatch = products.find(p => String(p.code) === cleanKey);
+  if (codeMatch) return codeMatch;
+
+  // 3. Case-insensitive match on product code
   const lowerKey = cleanKey.toLowerCase();
-  
-  // 1. Direct match on id or code
-  const exact = products.find(p => p.id === cleanKey || p.code === cleanKey);
-  if (exact) return exact;
+  const codeCaseMatch = products.find(p => String(p.code).toLowerCase() === lowerKey);
+  if (codeCaseMatch) return codeCaseMatch;
 
-  // 2. Case-insensitive match on id or code
-  const caseMatch = products.find(p => p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey);
-  if (caseMatch) return caseMatch;
-
-  // 3. Match on exact product name
+  // 4. Exact trimmed match on product name
   const nameMatch = products.find(p => p.name.trim().toLowerCase() === lowerKey);
   if (nameMatch) return nameMatch;
-
-  // 4. Strict numeric match (e.g. "101" -> "NASSER-101" or id="101")
-  if (/^\d+$/.test(cleanKey)) {
-    const numMatch = products.find(p => p.id === cleanKey || p.code === `NASSER-${cleanKey}` || p.code === cleanKey);
-    if (numMatch) return numMatch;
-  }
-
-  // 5. Strict "NASSER-xxx" match
-  if (lowerKey.startsWith('nasser-')) {
-    const numPart = lowerKey.replace('nasser-', '').trim();
-    if (numPart) {
-      const match = products.find(p => p.code.toLowerCase() === `nasser-${numPart}` || p.id === numPart);
-      if (match) return match;
-    }
-  }
 
   return undefined;
 }

@@ -670,46 +670,36 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return {}
 
     def _find_product(self, cursor, p_id):
-        """Universal resilient product lookup supporting ID, exact code, strict formatted code (NASSER-xxx), and exact trimmed name"""
+        """Universal resilient product lookup strictly isolating Primary Key ID, exact Code, and Name"""
         if not p_id:
             return None
         p_id_str = str(p_id).strip()
         if p_id_str.lower() in ('', 'none', 'null', 'undefined'):
             return None
 
-        # 1. Exact match on id or code
-        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE id=? OR code=?", (p_id_str, p_id_str))
+        # 1. Exact match on primary key ID
+        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE id=?", (p_id_str,))
         row = cursor.fetchone()
         if row:
             return row
 
-        # 2. Case-insensitive trimmed match on code or id
-        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?)) OR LOWER(TRIM(id))=LOWER(TRIM(?))", (p_id_str, p_id_str))
+        # 2. Exact match on product code
+        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE code=?", (p_id_str,))
         row = cursor.fetchone()
         if row:
             return row
 
-        # 3. Exact or trimmed match on name
+        # 3. Case-insensitive trimmed match on code
+        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?))", (p_id_str,))
+        row = cursor.fetchone()
+        if row:
+            return row
+
+        # 4. Exact trimmed match on name
         cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(name))=LOWER(TRIM(?))", (p_id_str,))
         row = cursor.fetchone()
         if row:
             return row
-
-        # 4. Strict numeric match (e.g. "101" -> "NASSER-101" or id="101")
-        if p_id_str.isdigit():
-            cursor.execute("SELECT id, code, name, stock, price FROM products WHERE code=? OR id=?", (f"NASSER-{p_id_str}", p_id_str))
-            num_row = cursor.fetchone()
-            if num_row:
-                return num_row
-
-        # 5. Strict "NASSER-xxx" match
-        if p_id_str.upper().startswith('NASSER-'):
-            num_part = p_id_str.upper().replace('NASSER-', '').strip()
-            if num_part:
-                cursor.execute("SELECT id, code, name, stock, price FROM products WHERE id=? OR code=?", (num_part, f"NASSER-{num_part}"))
-                nrow = cursor.fetchone()
-                if nrow:
-                    return nrow
 
         return None
 
@@ -1434,14 +1424,14 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                             cursor.execute('''
                                 UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, unit_price=?, description=?, updated_at=?
-                                WHERE id=? OR code=?
-                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso, actual_id, actual_id))
+                                WHERE id=?
+                            ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso, actual_id))
                             
                             if cursor.rowcount == 0:
                                 cursor.execute('''
                                     UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, price=?, unit_price=?, description=?, updated_at=?
-                                    WHERE id=? OR code=? OR name=?
-                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso, p_id, p_id, p_name))
+                                    WHERE code=?
+                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso, p_code))
 
                             commit_and_sync(conn)
                         finally:

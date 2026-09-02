@@ -411,14 +411,14 @@ export default function App() {
     const createdMovements: StockMovement[] = [];
     let updatedProducts = [...products];
 
-    // Pre-check stock with type-safe Number() conversions and multi-field matching
+    // Pre-check stock with type-safe Number() conversions and clean matching
     for (const itm of batchData.items) {
       const requestedQty = Math.max(1, Number(itm.quantity) || 1);
+      const targetId = itm.productId ? String(itm.productId) : '';
       const p = updatedProducts.find(prod => 
-        (itm.productId && prod.id === itm.productId) || 
+        (targetId && String(prod.id) === targetId) || 
         (itm.productCode && prod.code === itm.productCode) || 
-        (itm.productName && prod.name === itm.productName) ||
-        (itm.productId && prod.code === itm.productId)
+        (itm.productName && prod.name === itm.productName)
       );
       if (!p) {
         const label = itm.productName || itm.productCode || itm.productId || 'غير معروف';
@@ -433,11 +433,11 @@ export default function App() {
     // Deduct & create logs atomically
     for (const itm of batchData.items) {
       const requestedQty = Math.max(1, Number(itm.quantity) || 1);
+      const targetId = itm.productId ? String(itm.productId) : '';
       const pIndex = updatedProducts.findIndex(prod => 
-        (itm.productId && prod.id === itm.productId) || 
+        (targetId && String(prod.id) === targetId) || 
         (itm.productCode && prod.code === itm.productCode) || 
-        (itm.productName && prod.name === itm.productName) ||
-        (itm.productId && prod.code === itm.productId)
+        (itm.productName && prod.name === itm.productName)
       );
       const prod = updatedProducts[pIndex];
       const prevStock = Number(prod.stock) || 0;
