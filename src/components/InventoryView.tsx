@@ -136,21 +136,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Direct Click-to-Add to Side Delivery Order Cart
   const handleToggleProductCart = (product: Product) => {
-    const liveProd = products.find(p => p.id === product.id) || product;
+    if (!product || !product.id) return;
+    const liveProd = products.find(p => p.id === product.id || (p.code && p.code === product.code)) || product;
     if (liveProd.stock <= 0) {
       alert(`عفواً، الصنف (${liveProd.name}) غير متوفر بالمخزن حالياً (الرصيد المتاح: 0).`);
       return;
     }
 
     setCartItems(prev => {
-      const existing = prev.find(item => item.product.id === product.id);
+      const existing = prev.find(item => item.product.id === liveProd.id || (item.product.code && item.product.code === liveProd.code));
       if (existing) {
         if (existing.quantity >= liveProd.stock) {
           alert(`تنبيه: الرصيد المتاح من (${liveProd.name}) هو ${liveProd.stock} قطعة فقط. لا يمكن تجاوز هذا الرصيد.`);
           return prev;
         }
         return prev.map(item =>
-          item.product.id === product.id
+          (item.product.id === liveProd.id || (item.product.code && item.product.code === liveProd.code))
             ? { ...item, quantity: item.quantity + 1, product: liveProd }
             : item
         );
@@ -161,11 +162,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   const handleUpdateCartQuantity = (productId: string, newQty: number) => {
+    if (!productId) return;
     if (newQty <= 0) {
       handleRemoveFromCart(productId);
       return;
     }
-    const liveProd = products.find(p => p.id === productId);
+    const liveProd = products.find(p => p.id === productId || (p.code && p.code === productId));
     const maxStock = liveProd ? liveProd.stock : 0;
 
     if (newQty > maxStock) {
@@ -175,7 +177,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     setCartItems(prev =>
       prev.map(item =>
-        item.product.id === productId
+        (item.product.id === productId || (item.product.code && item.product.code === productId))
           ? { ...item, quantity: newQty, product: liveProd || item.product }
           : item
       )
@@ -183,7 +185,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   const handleRemoveFromCart = (productId: string) => {
-    setCartItems(prev => prev.filter(item => item.product.id !== productId));
+    if (!productId) return;
+    setCartItems(prev => prev.filter(item => item.product.id !== productId && item.product.code !== productId));
   };
 
   const handleClearCart = () => {
@@ -699,6 +702,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         });
         if (res.success) {
           setIsModalOpen(false);
+          setSelectedProductId(null);
+          setCode('');
+          setName('');
+          setStock('0');
+          setMinStock('5');
         } else {
           setFormError(res.message || 'فشلت عملية إضافة الصنف');
         }
@@ -1027,9 +1035,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
           {/* Selected Product Quick Info Bar (Single Selection Indicator) */}
           {selectedProductId && (() => {
-            const selProd = products.find(p => p.id === selectedProductId);
+            const selProd = products.find(p => p.id === selectedProductId || (p.code && p.code === selectedProductId));
             if (!selProd) return null;
-            const inCart = cartItems.some(item => item.product.id === selProd.id);
+            const inCart = Boolean(selProd.id && cartItems.some(item => item.product?.id === selProd.id || (item.product?.code && item.product.code === selProd.code)));
             return (
               <div className="bg-blue-50/90 border border-blue-200 p-3 rounded-xl flex items-center justify-between gap-3 text-xs animate-fadeIn">
                 <div className="flex items-center gap-2 text-blue-950 font-bold">
@@ -1112,14 +1120,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     </tr>
                   ) : (
                     filteredProducts.map((product) => {
-                      const isSelected = selectedProductId === product.id;
-                      const inCart = cartItems.find(item => item.product.id === product.id);
+                      const isSelected = Boolean(selectedProductId && product.id && (selectedProductId === product.id || (product.code && selectedProductId === product.code)));
+                      const inCart = Boolean(product.id && cartItems.some(item => item.product?.id === product.id || (item.product?.code && item.product.code === product.code)));
                       const isOutOfStock = product.stock <= 0;
 
                       return (
                         <tr
-                          key={product.id}
-                          onClick={() => setSelectedProductId(product.id)}
+                          key={product.id || product.code}
+                          onClick={() => setSelectedProductId(prev => prev === product.id ? null : product.id)}
                           onDoubleClick={() => handleToggleProductCart(product)}
                           className={`transition-all cursor-pointer select-none ${
                             isSelected

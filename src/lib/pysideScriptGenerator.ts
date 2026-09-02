@@ -342,10 +342,11 @@ def init_sqlite_db():
                     ('updated_at', 'TEXT DEFAULT ""')
                 ])
 
-                # تنظيف أي قيم خالية في أسعار الأصناف لضمان استقرار العمليات الحسابية
+                # تنظيف أي قيم خالية وضمان معرفات فريدة
                 try:
                     cursor.execute("UPDATE products SET price = 0.0 WHERE price IS NULL")
                     cursor.execute("UPDATE products SET unit_price = price WHERE unit_price IS NULL OR unit_price = 0.0")
+                    cursor.execute("UPDATE products SET id = CAST(rowid AS TEXT) WHERE id IS NULL OR id = '' OR id = 'None'")
                 except Exception:
                     pass
 
@@ -669,7 +670,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return {}
 
     def _find_product(self, cursor, p_id):
-        """Universal resilient product lookup supporting ID, exact code, numeric code (e.g. 1001 or NASSER-1001), trimmed name, and space/dash-free dense code"""
+        """Universal resilient product lookup supporting ID, exact code, strict formatted code (NASSER-xxx), and exact trimmed name"""
         if not p_id:
             return None
         p_id_str = str(p_id).strip()
@@ -694,35 +695,22 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if row:
             return row
 
-        # 4. If p_id_str contains numbers e.g. "1001", check if code is "NASSER-1001" or ends with "-1001" or contains 1001
-        nums = re.findall(r'\d+', p_id_str)
-        if nums:
-            num_str = nums[0]
-            cursor.execute("SELECT id, code, name, stock, price FROM products WHERE code=? OR code LIKE ? OR id=?", (num_str, f"%{num_str}", num_str))
+        # 4. Strict numeric match (e.g. "101" -> "NASSER-101" or id="101")
+        if p_id_str.isdigit():
+            cursor.execute("SELECT id, code, name, stock, price FROM products WHERE code=? OR id=?", (f"NASSER-{p_id_str}", p_id_str))
             num_row = cursor.fetchone()
             if num_row:
                 return num_row
 
-        # 5. Dense alphanumeric match (ignoring spaces, hyphens, underscores, slashes, dots safely)
-        try:
-            dense_target = re.sub(r'[\s_./-]', '', p_id_str).lower()
-        except Exception:
-            dense_target = ''.join(c for c in p_id_str if c.isalnum()).lower()
+        # 5. Strict "NASSER-xxx" match
+        if p_id_str.upper().startswith('NASSER-'):
+            num_part = p_id_str.upper().replace('NASSER-', '').strip()
+            if num_part:
+                cursor.execute("SELECT id, code, name, stock, price FROM products WHERE id=? OR code=?", (num_part, f"NASSER-{num_part}"))
+                nrow = cursor.fetchone()
+                if nrow:
+                    return nrow
 
-        if dense_target:
-            cursor.execute("SELECT id, code, name, stock, price FROM products")
-            for prod_row in cursor.fetchall():
-                try:
-                    p_code_dense = re.sub(r'[\s_./-]', '', str(prod_row[1] or '')).lower()
-                    p_id_dense = re.sub(r'[\s_./-]', '', str(prod_row[0] or '')).lower()
-                    p_name_dense = re.sub(r'[\s_./-]', '', str(prod_row[2] or '')).lower()
-                except Exception:
-                    p_code_dense = ''.join(c for c in str(prod_row[1] or '') if c.isalnum()).lower()
-                    p_id_dense = ''.join(c for c in str(prod_row[0] or '') if c.isalnum()).lower()
-                    p_name_dense = ''.join(c for c in str(prod_row[2] or '') if c.isalnum()).lower()
-
-                if p_code_dense == dense_target or p_id_dense == dense_target or p_name_dense == dense_target:
-                    return prod_row
         return None
 
     def do_OPTIONS(self):
@@ -752,16 +740,29 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         conn = get_db_connection()
                         try:
                             cursor = conn.cursor()
-                            cursor.execute("SELECT id, code, name, category, stock, min_stock, unit, price, description, updated_at FROM products ORDER BY rowid DESC")
+                            cursor.execute("SELECT id, code, name, category, stock, min_stock, unit, price, description, updated_at, rowid FROM products ORDER BY rowid DESC")
                             rows = cursor.fetchall()
                         finally:
                             conn.close()
 
-                    products = [{
-                        "id": str(r[0]), "code": r[1], "name": r[2], "category": r[3],
-                        "stock": r[4], "minStock": r[5], "unit": r[6], "price": r[7] if r[7] is not None else 0,
-                        "description": r[8] or "", "updatedAt": r[9] or ""
-                    } for r in rows]
+                    products = []
+                    for r in rows:
+                        p_id_raw = r[0]
+                        p_rowid = r[10]
+                        final_id = str(p_id_raw) if (p_id_raw is not None and str(p_id_raw).strip() not in ('', 'None', 'none', 'null', 'undefined')) else str(p_rowid)
+                        p_code = r[1] or f"NASSER-{final_id}"
+                        products.append({
+                            "id": final_id,
+                            "code": p_code,
+                            "name": r[2] or "",
+                            "category": r[3] or "عام",
+                            "stock": r[4] if r[4] is not None else 0,
+                            "minStock": r[5] if r[5] is not None else 5,
+                            "unit": r[6] or "وحدة",
+                            "price": r[7] if r[7] is not None else 0.0,
+                            "description": r[8] or "",
+                            "updatedAt": r[9] or ""
+                        })
                     return self._send_json({"success": True, "products": products})
                 except Exception as e:
                     return self._send_json({"success": False, "error": str(e)}, 500)

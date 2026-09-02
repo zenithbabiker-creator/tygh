@@ -572,7 +572,12 @@ app.post('/api/auth/reset-password-offline', (req, res) => {
 // PRODUCTS - List all
 app.get('/api/products', (req, res) => {
   const db = readDB();
-  res.json({ success: true, products: db.products });
+  const sanitized = (db.products || []).map((p, idx) => ({
+    ...p,
+    id: p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase()) ? String(p.id) : String(idx + 1),
+    code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || p.id || idx + 101}`,
+  }));
+  res.json({ success: true, products: sanitized });
 });
 
 // PRODUCTS - Create Product
@@ -845,7 +850,7 @@ app.delete('/api/products/:id', (req, res) => {
   res.json({ success: true, message: 'تم حذف الصنف من قاعدة البيانات بنجاح' });
 });
 
-// Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, numeric code, name, or space/dash-free code)
+// Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, strict formatted code, or exact name)
 function findProductInList(products: Product[], idOrCodeOrName: string): Product | undefined {
   if (!idOrCodeOrName) return undefined;
   const cleanKey = String(idOrCodeOrName).trim();
@@ -861,42 +866,23 @@ function findProductInList(products: Product[], idOrCodeOrName: string): Product
   const caseMatch = products.find(p => p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey);
   if (caseMatch) return caseMatch;
 
-  // 3. Match on product name
+  // 3. Match on exact product name
   const nameMatch = products.find(p => p.name.trim().toLowerCase() === lowerKey);
   if (nameMatch) return nameMatch;
 
-  // 4. Numeric match (e.g. 1001 vs NASSER-1001 or 1001)
-  const nums = cleanKey.match(/\d+/);
-  if (nums) {
-    const numStr = nums[0];
-    const numMatch = products.find(p => p.code === numStr || p.code.endsWith(`-${numStr}`) || p.id === numStr);
+  // 4. Strict numeric match (e.g. "101" -> "NASSER-101" or id="101")
+  if (/^\d+$/.test(cleanKey)) {
+    const numMatch = products.find(p => p.id === cleanKey || p.code === `NASSER-${cleanKey}` || p.code === cleanKey);
     if (numMatch) return numMatch;
   }
 
-  // 5. Dense alphanumeric match (ignoring spaces, hyphens, underscores, slashes, dots safely)
-  let denseKey = '';
-  try {
-    denseKey = lowerKey.replace(/[\s_./-]/g, '');
-  } catch {
-    denseKey = lowerKey.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
-  }
-
-  if (denseKey.length > 0) {
-    return products.find(p => {
-      let pDenseCode = '';
-      let pDenseId = '';
-      let pDenseName = '';
-      try {
-        pDenseCode = p.code.toLowerCase().replace(/[\s_./-]/g, '');
-        pDenseId = p.id.toLowerCase().replace(/[\s_./-]/g, '');
-        pDenseName = p.name.toLowerCase().replace(/[\s_./-]/g, '');
-      } catch {
-        pDenseCode = p.code.toLowerCase().replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
-        pDenseId = p.id.toLowerCase().replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
-        pDenseName = p.name.toLowerCase().replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '');
-      }
-      return pDenseCode === denseKey || pDenseId === denseKey || pDenseName === denseKey;
-    });
+  // 5. Strict "NASSER-xxx" match
+  if (lowerKey.startsWith('nasser-')) {
+    const numPart = lowerKey.replace('nasser-', '').trim();
+    if (numPart) {
+      const match = products.find(p => p.code.toLowerCase() === `nasser-${numPart}` || p.id === numPart);
+      if (match) return match;
+    }
   }
 
   return undefined;

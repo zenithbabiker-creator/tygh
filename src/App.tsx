@@ -116,11 +116,18 @@ export default function App() {
     try {
       const res = await safeJsonFetch('/api/products');
       if (res.isJson && res.data && res.data.success && Array.isArray(res.data.products)) {
-        // Standardize any legacy codes to NASSER-
-        const normalized = res.data.products.map((p: Product) => ({
-          ...p,
-          code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || p.id}`,
-        }));
+        // Standardize codes and ensure unique string IDs
+        const normalized = res.data.products.map((p: Product, idx: number) => {
+          const validId = p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase())
+            ? String(p.id)
+            : (p.code ? String(p.code) : `prd_${idx + 1}`);
+          const validCode = p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || validId}`;
+          return {
+            ...p,
+            id: validId,
+            code: validCode,
+          };
+        });
         setProducts(normalized);
         try {
           localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(normalized));
@@ -131,10 +138,16 @@ export default function App() {
         const saved = localStorage.getItem('nasser_warehouse_products_v5') || localStorage.getItem('nasser_warehouse_products_v4');
         if (saved) {
           const parsed = JSON.parse(saved);
-          const normalized = parsed.map((p: Product) => ({
-            ...p,
-            code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || p.id}`,
-          }));
+          const normalized = parsed.map((p: Product, idx: number) => {
+            const validId = p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase())
+              ? String(p.id)
+              : `prd_${idx + 1}`;
+            return {
+              ...p,
+              id: validId,
+              code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || validId}`,
+            };
+          });
           setProducts(normalized);
         }
       }
@@ -142,10 +155,16 @@ export default function App() {
       const saved = localStorage.getItem('nasser_warehouse_products_v5') || localStorage.getItem('nasser_warehouse_products_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
-        const normalized = parsed.map((p: Product) => ({
-          ...p,
-          code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || p.id}`,
-        }));
+        const normalized = parsed.map((p: Product, idx: number) => {
+          const validId = p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase())
+            ? String(p.id)
+            : `prd_${idx + 1}`;
+          return {
+            ...p,
+            id: validId,
+            code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || validId}`,
+          };
+        });
         setProducts(normalized);
       }
     }
