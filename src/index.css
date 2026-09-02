@@ -53,32 +53,51 @@
 @media print {
   html, body {
     height: auto !important;
+    min-height: 0 !important;
     overflow: visible !important;
     margin: 0 !important;
     padding: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
+    position: static !important;
+    display: block !important;
   }
 
-  /* Hide non-print controls and navigation */
+  /* Hide non-print controls, modal backdrops and navigation */
   .no-print,
   button,
   header,
   nav,
   aside,
-  footer {
+  footer,
+  [data-no-print] {
     display: none !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
     visibility: hidden !important;
   }
 
-  /* Reset fixed positioning and overflows on parent modal wrappers so nothing clips */
-  #root, main, .fixed, [class*="backdrop"], .overflow-y-auto, .max-h-\[95vh\] {
+  /* Completely reset modal wrappers, overlays, and transforms so everything starts at page top */
+  #root,
+  main,
+  .modal-overlay-stable,
+  .modal-content-stable,
+  .fixed,
+  [class*="backdrop"],
+  .overflow-y-auto,
+  .max-h-\[95vh\],
+  .min-h-screen {
     position: static !important;
     display: block !important;
     overflow: visible !important;
     height: auto !important;
+    min-height: 0 !important;
     max-height: none !important;
     width: 100% !important;
+    max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     background: transparent !important;
@@ -86,6 +105,9 @@
     box-shadow: none !important;
     border: none !important;
     transform: none !important;
+    contain: none !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
   }
 
   /* Hide background elements by default */
@@ -106,18 +128,19 @@
     print-color-adjust: exact !important;
   }
 
-  /* Position printable canvas cleanly on paper */
+  /* Position printable invoice directly at the top of the printed page */
   .printable,
   .print-area {
-    position: absolute !important;
-    left: 0 !important;
+    position: relative !important;
     top: 0 !important;
+    left: 0 !important;
     right: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
     margin: 0 !important;
-    padding: 24px !important;
+    margin-top: 0 !important;
+    padding: 16px 20px !important;
     border: 2px solid #000000 !important;
     background: #ffffff !important;
     color: #000000 !important;
@@ -126,6 +149,8 @@
     overflow: visible !important;
     z-index: 999999 !important;
     display: block !important;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
   }
 
   /* Preserve flex and grid display properties inside printable area */

@@ -214,7 +214,7 @@ export const LogsView: React.FC<LogsViewProps> = ({
                   <th className="p-3.5">البيان / السبب</th>
                   <th className="p-3.5">رقم المستند</th>
                   <th className="p-3.5">مسؤول المخزن</th>
-                  <th className="p-3.5 text-center">أمر التسليم</th>
+                  <th className="p-3.5 text-center">فاتورة المبيعات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -258,7 +258,7 @@ export const LogsView: React.FC<LogsViewProps> = ({
                             ) : (
                               <>
                                 <ArrowUpLeft className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                                <span>صرف (-)</span>
+                                <span>بيع / صرف (-)</span>
                               </>
                             )}
                           </span>
@@ -301,15 +301,15 @@ export const LogsView: React.FC<LogsViewProps> = ({
                           </span>
                         </td>
 
-                        {/* Delivery Order Print Action */}
+                        {/* Invoice Print Action */}
                         <td className="p-3.5 text-center">
                           <button
                             onClick={() => setSelectedDeliveryOrder(mvt)}
                             className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-200 rounded-lg text-xs font-bold transition flex items-center gap-1 mx-auto cursor-pointer shadow-xs"
-                            title="معاينة وطباعة أمر التسليم الرسمي المكتوب عليه عدد الوحدات"
+                            title="معاينة وطباعة فاتورة المبيعات الرسمية"
                           >
                             <Printer className="w-3.5 h-3.5" />
-                            <span>أمر التسليم</span>
+                            <span>الفاتورة</span>
                           </button>
                         </td>
 
