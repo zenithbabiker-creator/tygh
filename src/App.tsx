@@ -28,22 +28,21 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [usersList, setUsersList] = useState<User[]>([]);
   const [loginUsername, setLoginUsername] = useState('admin');
-  // First Launch Password Policy: Default prefill only on first ever launch, empty on all subsequent sessions/logins
-  const [loginPassword, setLoginPassword] = useState(() => {
-    try {
-      const hasLaunched = localStorage.getItem('nasser_first_launch_done');
-      if (!hasLaunched) {
-        localStorage.setItem('nasser_first_launch_done', 'true');
-        return 'admin123';
-      }
-    } catch {
-      // ignore
-    }
-    return '';
-  });
+  // Strict Policy: Password is NEVER pre-filled or displayed in GUI, user must enter it every time
+  const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Guarantee password is empty on mount and session resume
+  useEffect(() => {
+    setLoginPassword('');
+    try {
+      localStorage.removeItem('nasser_first_launch_done');
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Active View Tab Navigation
   const [activeTab, setActiveTab] = useState<'INVENTORY' | 'LOGS' | 'USERS'>('INVENTORY');
@@ -122,6 +121,7 @@ export default function App() {
 
   // Modals
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+  const [targetPasswordUsername, setTargetPasswordUsername] = useState('');
 
   // Data Sync Handlers
   const fetchProducts = async () => {
@@ -271,13 +271,16 @@ export default function App() {
       console.warn('Server offline, fallback login');
     }
 
-    // Fallback Offline Login using locally saved or default credentials
+    // Fallback Offline Login using saved custom passwords or defaults
     const cleanUser = loginUsername.toLowerCase().trim();
     const cleanPass = loginPassword.trim();
-    const customAdminPass = localStorage.getItem('nasser_custom_password_admin') || 'admin123';
-    const customWhPass = localStorage.getItem('nasser_custom_password_wh_manager') || 'wh123';
+    const customAdminPass = localStorage.getItem('nasser_custom_password_admin');
+    const validAdminPass = customAdminPass || 'admin123';
 
-    if (cleanUser === 'admin' && (cleanPass === customAdminPass || cleanPass === 'admin123')) {
+    const customWhPass = localStorage.getItem('nasser_custom_password_wh_manager');
+    const validWhPass = customWhPass || 'wh123';
+
+    if (cleanUser === 'admin' && cleanPass === validAdminPass) {
       setCurrentUser({
         id: 'usr_1',
         username: 'admin',
@@ -286,7 +289,7 @@ export default function App() {
         gmail: 'zenithbabiker@gmail.com',
         createdAt: new Date().toISOString(),
       });
-    } else if (cleanUser === 'wh_manager' && (cleanPass === customWhPass || cleanPass === 'wh123')) {
+    } else if (cleanUser === 'wh_manager' && cleanPass === validWhPass) {
       setCurrentUser({
         id: 'usr_2',
         username: 'wh_manager',
@@ -745,7 +748,7 @@ export default function App() {
 
           {/* Quick Demo Login Buttons */}
           <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 space-y-2 text-xs">
-            <span className="text-slate-400 font-bold block text-[11px]">اختر حساب لتسجيل الدخول السريع:</span>
+            <span className="text-slate-400 font-bold block text-[11px]">اختر الحساب لتسجيل الدخول:</span>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -753,16 +756,16 @@ export default function App() {
                   setLoginUsername('admin');
                   setLoginPassword('');
                 }}
-                className={`p-2 rounded-lg border text-right transition flex items-center gap-2 cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-right transition flex items-center gap-2 cursor-pointer ${
                   loginUsername === 'admin'
-                    ? 'bg-blue-950 border-blue-500 text-blue-300'
-                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                    ? 'bg-blue-950 border-blue-500 text-blue-300 shadow-sm'
+                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
                 }`}
               >
                 <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
                 <div>
-                  <span className="font-bold block text-white text-[11px]">المدير العام</span>
-                  <span className="text-[10px] text-slate-400 font-mono">admin (اكتب كلمة السر)</span>
+                  <span className="font-bold block text-white text-xs">المدير العام</span>
+                  <span className="text-[10px] text-slate-400 font-mono">حساب @admin</span>
                 </div>
               </button>
 
@@ -772,16 +775,16 @@ export default function App() {
                   setLoginUsername('wh_manager');
                   setLoginPassword('');
                 }}
-                className={`p-2 rounded-lg border text-right transition flex items-center gap-2 cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-right transition flex items-center gap-2 cursor-pointer ${
                   loginUsername === 'wh_manager'
-                    ? 'bg-blue-950 border-blue-500 text-blue-300'
-                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                    ? 'bg-blue-950 border-blue-500 text-blue-300 shadow-sm'
+                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
                 }`}
               >
                 <Warehouse className="w-4 h-4 text-emerald-400 shrink-0" />
                 <div>
-                  <span className="font-bold block text-white text-[11px]">أمين المخزن</span>
-                  <span className="text-[10px] text-slate-400 font-mono">wh_manager (اكتب كلمة السر)</span>
+                  <span className="font-bold block text-white text-xs">أمين المخزن</span>
+                  <span className="text-[10px] text-slate-400 font-mono">حساب @wh_manager</span>
                 </div>
               </button>
             </div>
@@ -802,13 +805,18 @@ export default function App() {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-bold text-slate-300">كلمة السر</label>
+                <label className="block text-xs font-bold text-slate-300">
+                  كلمة المرور <span className="text-amber-400 text-[10px] font-normal">(مطلوب إدخالها - لا تُحفظ تلقائياً)</span>
+                </label>
                 <button
                   type="button"
-                  onClick={() => setIsForgotPasswordOpen(true)}
+                  onClick={() => {
+                    setTargetPasswordUsername(loginUsername);
+                    setIsForgotPasswordOpen(true);
+                  }}
                   className="text-[11px] text-blue-400 hover:underline font-bold"
                 >
-                  نسيت كلمة السر؟ (استعادة/OTP)
+                  تغيير / نسيت كلمة السر؟
                 </button>
               </div>
               <div className="relative">
@@ -819,7 +827,10 @@ export default function App() {
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
                   autoComplete="new-password"
-                  placeholder="أدخل كلمة المرور"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  placeholder="أدخل كلمة المرور الخاصة بك هنا"
                   className="w-full pl-10 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
                 />
                 <button
@@ -855,11 +866,14 @@ export default function App() {
         <ForgotPasswordModal
           isOpen={isForgotPasswordOpen}
           isOffline={isOffline}
-          initialUsername={loginUsername}
+          initialUsername={targetPasswordUsername || loginUsername}
           onPasswordChanged={() => {
             setLoginPassword('');
           }}
-          onClose={() => setIsForgotPasswordOpen(false)}
+          onClose={() => {
+            setIsForgotPasswordOpen(false);
+            setTargetPasswordUsername('');
+          }}
         />
       </div>
     );
@@ -957,9 +971,12 @@ export default function App() {
 
             <div className="flex items-center gap-1 shrink-0">
               <button
-                onClick={() => setIsForgotPasswordOpen(true)}
-                className="p-1.5 text-slate-400 hover:text-amber-300 hover:bg-slate-800 rounded-lg transition"
-                title="نسيت كلمة السر (إرسال OTP)"
+                onClick={() => {
+                  setTargetPasswordUsername(currentUser?.username || '');
+                  setIsForgotPasswordOpen(true);
+                }}
+                className="p-1.5 text-slate-400 hover:text-amber-300 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                title="تغيير كلمة المرور الخاصة بحسابك"
               >
                 <KeyRound className="w-4 h-4" />
               </button>
@@ -1007,7 +1024,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             {/* Active User Badge */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs">
               <div className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-xs shadow-2xs">
@@ -1025,6 +1042,19 @@ export default function App() {
               </div>
             </div>
 
+            {/* Change Password Button */}
+            <button
+              onClick={() => {
+                setTargetPasswordUsername(currentUser?.username || '');
+                setIsForgotPasswordOpen(true);
+              }}
+              className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+              title="تغيير كلمة المرور الخاصة بحسابك"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-amber-700" />
+              <span className="hidden sm:inline">تغيير كلمة السر</span>
+            </button>
+
             {/* Switch User / Logout Button */}
             <button
               onClick={handleLogout}
@@ -1032,7 +1062,7 @@ export default function App() {
               title="تسجيل الخروج والعودة لشاشة الدخول للتبديل بين الحسابات"
             >
               <LogOut className="w-4 h-4" />
-              <span>تسجيل الخروج / تبديل الحساب</span>
+              <span>تسجيل الخروج</span>
             </button>
           </div>
         </header>
@@ -1067,6 +1097,10 @@ export default function App() {
               users={usersList}
               currentUser={currentUser}
               onCreateUser={handleCreateUser}
+              onOpenChangePassword={(uname) => {
+                setTargetPasswordUsername(uname);
+                setIsForgotPasswordOpen(true);
+              }}
               onBack={handleGoBack}
             />
           )}
@@ -1090,11 +1124,14 @@ export default function App() {
       <ForgotPasswordModal
         isOpen={isForgotPasswordOpen}
         isOffline={isOffline}
-        initialUsername={currentUser?.username || loginUsername}
+        initialUsername={targetPasswordUsername || currentUser?.username || loginUsername}
         onPasswordChanged={() => {
           setLoginPassword('');
         }}
-        onClose={() => setIsForgotPasswordOpen(false)}
+        onClose={() => {
+          setIsForgotPasswordOpen(false);
+          setTargetPasswordUsername('');
+        }}
       />
 
     </div>

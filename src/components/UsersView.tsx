@@ -25,6 +25,7 @@ interface UsersViewProps {
     role: UserRole;
     gmail: string;
   }) => Promise<{ success: boolean; message?: string }>;
+  onOpenChangePassword?: (username: string) => void;
   onBack?: () => void;
 }
 
@@ -32,6 +33,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
   users,
   currentUser,
   onCreateUser,
+  onOpenChangePassword,
   onBack,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -186,11 +188,24 @@ export const UsersView: React.FC<UsersViewProps> = ({
               </div>
             </div>
 
-            <div className="text-[11px] text-slate-500 border-t border-slate-100 pt-2 font-bold">
-              {user.role === 'GENERAL_MANAGER' ? (
-                <span className="text-blue-700">✓ صلاحيات كاملة: إضافة وتعديل المخزون، الأسعار، والمستخدمين</span>
-              ) : (
-                <span className="text-emerald-800">✓ صلاحيات مخزنية: تسجيل التوريد، الصرف، والجرد والمتابعة</span>
+            <div className="text-[11px] text-slate-500 border-t border-slate-100 pt-2 font-bold flex items-center justify-between">
+              <div>
+                {user.role === 'GENERAL_MANAGER' ? (
+                  <span className="text-blue-700">✓ صلاحيات كاملة</span>
+                ) : (
+                  <span className="text-emerald-800">✓ صلاحيات مخزنية</span>
+                )}
+              </div>
+              {onOpenChangePassword && (
+                <button
+                  type="button"
+                  onClick={() => onOpenChangePassword(user.username)}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300 text-slate-700 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer border border-slate-200"
+                  title={`تغيير وتعيين كلمة المرور لحساب ${user.name}`}
+                >
+                  <Key className="w-3 h-3 text-amber-600" />
+                  <span>تغيير كلمة السر</span>
+                </button>
               )}
             </div>
           </div>
