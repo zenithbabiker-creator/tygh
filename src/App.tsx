@@ -317,6 +317,8 @@ export default function App() {
     quantity: number;
     reason: string;
     referenceNo?: string;
+    productCode?: string;
+    productName?: string;
   }) => {
     try {
       const res = await safeJsonFetch('/api/movements', {
@@ -331,6 +333,19 @@ export default function App() {
 
       if (res.isJson && res.data) {
         if (res.data.success) {
+          if (res.data.product) {
+            setProducts(prev => {
+              const updated = prev.map(p => 
+                (String(p.id) === String(res.data.product.id) || p.code === res.data.product.code) 
+                  ? { ...p, stock: Number(res.data.product.stock), updatedAt: new Date().toISOString() } 
+                  : p
+              );
+              try {
+                localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+              } catch (e) {}
+              return updated;
+            });
+          }
           await fetchProducts();
           await fetchMovements();
           await fetchLogs();
@@ -344,7 +359,11 @@ export default function App() {
     }
 
     // OFFLINE FALLBACK
-    const targetProduct = products.find(p => p.id === movementData.productId);
+    const targetProduct = products.find(p => 
+      (p.id && String(p.id) === String(movementData.productId)) || 
+      (movementData.productCode && p.code === movementData.productCode) || 
+      (movementData.productName && p.name === movementData.productName)
+    );
     if (!targetProduct) return { success: false, message: 'الصنف غير موجود' };
 
     const previousStock = targetProduct.stock;
@@ -418,6 +437,27 @@ export default function App() {
 
       if (res.isJson && res.data) {
         if (res.data.success) {
+          // Immediately update local product state to reflect deducted stock without waiting
+          setProducts(prev => {
+            const updated = prev.map(p => {
+              const matchedItem = batchData.items.find(itm => 
+                (itm.productId && String(p.id) === String(itm.productId)) ||
+                (itm.productCode && p.code.toLowerCase().trim() === itm.productCode.toLowerCase().trim()) ||
+                (itm.productName && p.name.toLowerCase().trim() === itm.productName.toLowerCase().trim())
+              );
+              if (matchedItem) {
+                const qty = Math.max(1, Number(matchedItem.quantity) || 1);
+                const prevStock = Number(p.stock) || 0;
+                return { ...p, stock: Math.max(0, prevStock - qty), updatedAt: new Date().toISOString() };
+              }
+              return p;
+            });
+            try {
+              localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+            } catch (e) {}
+            return updated;
+          });
+
           await fetchProducts();
           await fetchMovements();
           await fetchLogs();
@@ -511,6 +551,28 @@ export default function App() {
 
       if (res.isJson && res.data) {
         if (res.data.success) {
+          if (res.data.product) {
+            const savedProd: Product = {
+              id: String(res.data.product.id),
+              code: String(res.data.product.code),
+              name: String(res.data.product.name),
+              category: res.data.product.category || 'عام',
+              stock: Number(res.data.product.stock) || 0,
+              price: Number(res.data.product.price) || 0,
+              minStock: Number(res.data.product.minStock) || 5,
+              unit: res.data.product.unit || 'وحدة',
+              description: res.data.product.description || '',
+              updatedAt: res.data.product.updatedAt || new Date().toISOString(),
+            };
+            setProducts(prev => {
+              const filtered = prev.filter(p => String(p.id) !== savedProd.id && p.code !== savedProd.code);
+              const updated = [savedProd, ...filtered];
+              try {
+                localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+              } catch (e) {}
+              return updated;
+            });
+          }
           await fetchProducts();
           await fetchMovements();
           await fetchLogs();
@@ -559,6 +621,28 @@ export default function App() {
       });
 
       if (res.isJson && res.data && res.data.success) {
+        if (Array.isArray(res.data.products) && res.data.products.length > 0) {
+          const newAddedList: Product[] = res.data.products.map((p: any) => ({
+            id: String(p.id),
+            code: String(p.code),
+            name: String(p.name),
+            category: p.category || 'عام',
+            stock: Number(p.stock) || 0,
+            price: Number(p.price) || 0,
+            minStock: Number(p.minStock) || 5,
+            unit: p.unit || 'وحدة',
+            description: p.description || '',
+            updatedAt: p.updatedAt || new Date().toISOString(),
+          }));
+          setProducts(prev => {
+            const addedIds = new Set(newAddedList.map(p => p.id));
+            const updated = [...newAddedList, ...prev.filter(p => !addedIds.has(String(p.id)))];
+            try {
+              localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+            } catch (e) {}
+            return updated;
+          });
+        }
         await fetchProducts();
         await fetchMovements();
         await fetchLogs();

@@ -696,33 +696,33 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return {}
 
     def _find_product(self, cursor, p_id):
-        """Universal resilient product lookup strictly isolating Primary Key ID, exact Code, and Name"""
+        """Universal resilient product lookup strictly isolating Primary Key ID, rowid, exact Code, and Name"""
         if not p_id:
             return None
         p_id_str = str(p_id).strip()
         if p_id_str.lower() in ('', 'none', 'null', 'undefined'):
             return None
 
-        # 1. Exact match on primary key ID
-        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE id=?", (p_id_str,))
+        # 1. Exact match on primary key ID or rowid
+        cursor.execute("SELECT id, code, name, stock, price, rowid FROM products WHERE id=? OR rowid=?", (p_id_str, p_id_str))
         row = cursor.fetchone()
         if row:
             return row
 
         # 2. Exact match on product code
-        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE code=?", (p_id_str,))
+        cursor.execute("SELECT id, code, name, stock, price, rowid FROM products WHERE code=?", (p_id_str,))
         row = cursor.fetchone()
         if row:
             return row
 
         # 3. Case-insensitive trimmed match on code
-        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?))", (p_id_str,))
+        cursor.execute("SELECT id, code, name, stock, price, rowid FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?))", (p_id_str,))
         row = cursor.fetchone()
         if row:
             return row
 
         # 4. Exact trimmed match on name
-        cursor.execute("SELECT id, code, name, stock, price FROM products WHERE LOWER(TRIM(name))=LOWER(TRIM(?))", (p_id_str,))
+        cursor.execute("SELECT id, code, name, stock, price, rowid FROM products WHERE LOWER(TRIM(name))=LOWER(TRIM(?))", (p_id_str,))
         row = cursor.fetchone()
         if row:
             return row
@@ -1066,13 +1066,18 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             if cursor.fetchone()[0] > 0:
                                 code = f"NASSER-{max_num + 1}_{int(time.time()) % 100}"
 
-                            # Insert using SQLite native AUTOINCREMENT for primary key
+                            # Explicitly calculate and insert ID to ensure compatibility even if table was created without AUTOINCREMENT
+                            cursor.execute("SELECT MAX(CAST(id AS INTEGER)), MAX(rowid) FROM products")
+                            m_row = cursor.fetchone()
+                            m_val = max(int(m_row[0] or 0), int(m_row[1] or 0)) if m_row else 0
+                            explicit_id = str(m_val + 1)
+
                             cursor.execute('''
-                                INSERT INTO products (code, name, category, stock, min_stock, unit, price, unit_price, description, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (code, name, category, stock_val, min_stock, unit, price_val, price_val, desc, now_iso))
+                                INSERT INTO products (id, code, name, category, stock, min_stock, unit, price, unit_price, description, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (explicit_id, code, name, category, stock_val, min_stock, unit, price_val, price_val, desc, now_iso))
                             
-                            new_id = str(cursor.lastrowid)
+                            new_id = explicit_id
 
                             # Opening stock movement if stock > 0
                             if stock_val > 0:
@@ -1146,12 +1151,15 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                 p_price = max(0.0, float(itm.get('price') or 0.0))
                                 p_min = max(1, int(itm.get('minStock') or 5))
 
+                                cursor.execute("SELECT MAX(CAST(id AS INTEGER)), MAX(rowid) FROM products")
+                                b_m_row = cursor.fetchone()
+                                b_m_val = max(int(b_m_row[0] or 0), int(b_m_row[1] or 0)) if b_m_row else 0
+                                p_id = str(b_m_val + 1)
+
                                 cursor.execute('''
-                                    INSERT INTO products (code, name, category, stock, min_stock, unit, price, unit_price, description, updated_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', (p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso))
-                                
-                                p_id = str(cursor.lastrowid)
+                                    INSERT INTO products (id, code, name, category, stock, min_stock, unit, price, unit_price, description, updated_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (p_id, p_code, p_name, p_cat, p_stock, p_min, p_unit, p_price, p_price, p_desc, now_iso))
 
                                 if p_stock > 0:
                                     mov_id = f"mvt_{int(time.time()*1000)}_{p_id}"
@@ -1210,10 +1218,11 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             new_stock = 0
 
                             if p_row:
-                                actual_id = str(p_row[0])
+                                actual_id = str(p_row[0]) if (p_row[0] is not None and str(p_row[0]).strip() not in ('', 'None', 'null')) else str(p_row[5])
+                                actual_rowid = p_row[5]
                                 p_code = p_row[1]
                                 p_name = p_row[2]
-                                previous_stock = int(p_row[3])
+                                previous_stock = int(p_row[3] if p_row[3] is not None else 0)
                                 
                                 if m_type == 'IN':
                                     new_stock = previous_stock + qty
@@ -1224,7 +1233,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                 else:
                                     new_stock = previous_stock
                                 
-                                cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
+                                cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=? OR rowid=? OR code=?", (new_stock, now_iso, actual_id, actual_rowid, p_code))
                             else:
                                 new_stock = max(0, qty)
 
@@ -1319,10 +1328,14 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                 if not p_row and p_name_key:
                                     p_row = self._find_product(cursor, p_name_key)
 
-                                actual_id, p_code, p_name, prev_stock = str(p_row[0]), p_row[1], p_row[2], int(p_row[3] if p_row[3] is not None else 0)
+                                actual_id = str(p_row[0]) if (p_row[0] is not None and str(p_row[0]).strip() not in ('', 'None', 'null')) else str(p_row[5])
+                                actual_rowid = p_row[5]
+                                p_code = p_row[1]
+                                p_name = p_row[2]
+                                prev_stock = int(p_row[3] if p_row[3] is not None else 0)
                                 new_stock = max(0, prev_stock - qty)
 
-                                cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
+                                cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=? OR rowid=? OR code=?", (new_stock, now_iso, actual_id, actual_rowid, p_code))
 
                                 mov_id = f"mov_{int(time.time()*1000)}_{idx}"
                                 cursor.execute('''

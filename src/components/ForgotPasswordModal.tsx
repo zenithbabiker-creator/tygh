@@ -520,13 +520,11 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                 <div className="bg-blue-50 p-3 rounded-lg border border-blue-200 text-xs text-blue-900 space-y-1">
                   <p className="font-bold flex items-center gap-1">
                     <Mail className="w-3.5 h-3.5 text-blue-600" />
-                    <span>تم إرسال الرمز للبريد الإلكتروني</span>
+                    <span>تم إرسال رمز التحقق إلى عنوان البريد الإلكتروني المسجل</span>
                   </p>
-                  {demoCode && (
-                    <div className="pt-1 text-[11px] font-mono text-blue-800 border-t border-blue-200">
-                      💡 رمز الاختيار السريع للتجربة: <strong className="text-emerald-700 text-sm">{demoCode}</strong>
-                    </div>
-                  )}
+                  <p className="text-[11px] text-slate-600">
+                    يرجى التحقق من بريدك الإلكتروني وإدخال رمز التحقق (OTP) للمتابعة.
+                  </p>
                 </div>
 
                 <div>

@@ -257,8 +257,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     // Pre-flight validation: check all cart items against current stock with numeric normalization
     for (const item of cartItems) {
-      const pId = String(item.product.id);
-      const liveProd = products.find(p => String(p.id) === pId) || item.product;
+      const pId = String(item.product.id || '');
+      const pCode = String(item.product.code || '').trim().toLowerCase();
+      const pName = String(item.product.name || '').trim().toLowerCase();
+      const liveProd = products.find(p => 
+        (pId && String(p.id) === pId) || 
+        (pCode && p.code.trim().toLowerCase() === pCode) ||
+        (pName && p.name.trim().toLowerCase() === pName)
+      ) || item.product;
+
       const available = Number(liveProd ? liveProd.stock : item.product.stock) || 0;
       const requestedQty = Math.max(1, Number(item.quantity) || 1);
 
@@ -292,11 +299,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       }
 
       const dispatchItemsToPrint: DispatchItem[] = cartItems.map(item => {
+        const pId = String(item.product.id || '');
+        const pCode = String(item.product.code || '').trim().toLowerCase();
+        const pName = String(item.product.name || '').trim().toLowerCase();
         const liveProd = products.find(p => 
-          (p.id && item.product.id && p.id === item.product.id) || 
-          (p.code && item.product.code && p.code === item.product.code) ||
-          p.name === item.product.name
+          (pId && String(p.id) === pId) || 
+          (pCode && p.code.trim().toLowerCase() === pCode) ||
+          (pName && p.name.trim().toLowerCase() === pName)
         ) || item.product;
+
         const qty = Math.max(1, Number(item.quantity) || 1);
         const itemPrice = Number(liveProd.price) || 0;
         return {
@@ -308,10 +319,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       });
 
       const batchItemsPayload = cartItems.map(item => {
+        const pId = String(item.product.id || '');
+        const pCode = String(item.product.code || '').trim().toLowerCase();
+        const pName = String(item.product.name || '').trim().toLowerCase();
         const liveProd = products.find(p => 
-          (p.id && item.product.id && p.id === item.product.id) || 
-          (p.code && item.product.code && p.code === item.product.code) ||
-          p.name === item.product.name
+          (pId && String(p.id) === pId) || 
+          (pCode && p.code.trim().toLowerCase() === pCode) ||
+          (pName && p.name.trim().toLowerCase() === pName)
         ) || item.product;
 
         const itemPrice = Number(liveProd.price) || 0;
@@ -1039,11 +1053,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       </div>
 
-      {/* SPLIT VIEW LAYOUT: Main Table (Right/Center) + Side Invoice Cart Panel (Left) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 no-print">
+      {/* SPLIT VIEW LAYOUT: Product Table (Left) + Dedicated Invoice Details & Cart (Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 no-print">
         
-        {/* MAIN SECTION: Product Search & Table (2 cols on Desktop) */}
-        <div className="lg:col-span-2 space-y-4">
+        {/* MAIN SECTION: Product Search & Table (7-8 cols on Desktop, Left side in RTL) */}
+        <div className="lg:col-span-7 xl:col-span-8 space-y-4 lg:order-2">
           
           {/* Top Header Controls: Smart Search + Add Product */}
           <div className="bg-white rounded-2xl p-4 border border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-sm">
@@ -1287,24 +1301,117 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
         </div>
 
-        {/* SIDE PANEL: Sales Invoice Cart Preview (1 col on Desktop) */}
-        <div className="lg:col-span-1 space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden sticky top-6 flex flex-col min-h-[500px]">
-            
+        {/* RIGHT SIDE (In RTL): Dedicated Invoice Details & Sales Cart Column (4-5 cols, Right side) */}
+        <div className="lg:col-span-5 xl:col-span-4 space-y-5 lg:order-1">
+          
+          {/* CARD 1: Official Delivery Order & Invoice Details */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             {/* Header */}
             <div className="p-4 bg-gradient-to-r from-blue-900 to-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-emerald-400" />
-                <h3 className="font-extrabold text-sm sm:text-base">سلة فاتورة المبيعات</h3>
+                <FileText className="w-5 h-5 text-blue-400" />
+                <h3 className="font-extrabold text-sm sm:text-base">بيانات إذن التسليم والفاتورة</h3>
+              </div>
+              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-md font-black">
+                تسلسلي رسمي
+              </span>
+            </div>
+
+            <div className="p-4 space-y-3.5 bg-slate-50/50">
+              {/* Document Serial Number Field */}
+              <div>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-blue-600" />
+                    <span>رقم فاتورة المبيعات التسلسلي (تلقائي ومحمي):</span>
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-bold">محمي</span>
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  disabled
+                  value={getNextInvoiceNo()}
+                  className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-300 rounded-xl text-xs font-mono font-black text-blue-950 cursor-not-allowed select-none shadow-inner"
+                />
+              </div>
+
+              {/* Recipient Name Field */}
+              <div>
+                <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <UserIcon className="w-3.5 h-3.5 text-blue-600" />
+                    <span>اسم المستلم / العميل:</span>
+                  </span>
+                  <span className="text-[10px] text-rose-600 font-extrabold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">إجباري للطباعة</span>
+                </label>
+                <input
+                  type="text"
+                  value={recipientName}
+                  onChange={(e) => setRecipientName(e.target.value)}
+                  placeholder="أدخل اسم العميل أو المستلم هنا..."
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-none transition shadow-2xs"
+                />
+              </div>
+
+              {/* Totals Summary */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs font-bold shadow-2xs">
+                <div className="flex items-center justify-between text-slate-600">
+                  <span>إجمالي أصناف الفاتورة:</span>
+                  <strong className="text-blue-800 font-mono text-sm">{toArabicNumerals(cartTotals.totalItems)} صنف</strong>
+                </div>
+                <div className="flex items-center justify-between text-slate-700">
+                  <span>إجمالي الكميات المباعة:</span>
+                  <span className="text-slate-900 font-mono font-black text-sm">
+                    {toArabicNumerals(cartTotals.totalQuantity)} قطعة
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-slate-900 pt-2.5 border-t border-slate-200 font-extrabold">
+                  <span className="text-sm text-slate-900">المجموع الكلي للفاتورة:</span>
+                  <span className="text-base text-emerald-700 font-mono font-black">
+                    {toArabicNumerals(cartTotals.totalAmount.toLocaleString())} <span className="text-xs font-sans">ج.س</span>
+                  </span>
+                </div>
+              </div>
+
+              {!recipientName.trim() && cartItems.length > 0 && (
+                <p className="text-[11px] font-extrabold text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 text-center">
+                  ⚠️ يجب تعبئة اسم المستلم / العميل لتفعيل زر الطباعة
+                </p>
+              )}
+
+              {/* Print Action Button */}
+              <button
+                type="button"
+                disabled={isSubmitting || cartItems.length === 0 || !recipientName.trim()}
+                onClick={handleCompleteInvoice}
+                className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-lg shadow-emerald-200/50 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Printer className="w-4 h-4" />
+                <span>{isSubmitting ? 'جاري التوليد...' : 'إصدار وطباعة فاتورة المبيعات (Ctrl + P)'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* CARD 2: Dedicated Sales Cart Items List */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="p-3.5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="w-4 h-4 text-emerald-400" />
+                <h3 className="font-extrabold text-xs sm:text-sm">سلة المبيعات (الأصناف المختارة)</h3>
+                <span className="bg-blue-600/60 text-blue-200 px-2 py-0.5 rounded-full text-[11px] font-mono font-bold">
+                  {toArabicNumerals(cartItems.length)}
+                </span>
               </div>
               
               {cartItems.length > 0 && (
                 <button
                   onClick={handleClearCart}
-                  className="text-xs text-rose-300 hover:text-rose-100 font-bold transition flex items-center gap-1 cursor-pointer"
+                  className="text-xs text-rose-300 hover:text-rose-100 font-bold transition flex items-center gap-1 cursor-pointer bg-slate-800 px-2 py-1 rounded-lg border border-slate-700"
                 >
                   <X className="w-3.5 h-3.5" />
-                  <span>تفريغ</span>
+                  <span>تفريغ السلة</span>
                 </button>
               )}
             </div>
@@ -1317,18 +1424,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </div>
             )}
 
-            {/* Added Items List */}
-            <div className="flex-1 p-3 overflow-y-auto space-y-2.5 max-h-[420px]">
+            {/* Cart Items List */}
+            <div className="p-3 overflow-y-auto space-y-2.5 max-h-[480px]">
               {cartItems.length === 0 ? (
-                <div className="h-full py-16 text-center space-y-3 flex flex-col items-center justify-center text-slate-400">
-                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <ShoppingCart className="w-8 h-8 text-slate-300" />
+                <div className="py-12 text-center space-y-2.5 flex flex-col items-center justify-center text-slate-400">
+                  <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
+                    <ShoppingCart className="w-7 h-7 text-slate-300" />
                   </div>
-                  <p className="font-extrabold text-xs text-slate-700 max-w-xs">
-                    سلة فاتورة المبيعات فارغة حالياً
+                  <p className="font-extrabold text-xs text-slate-700">
+                    سلة المبيعات فارغة حالياً
                   </p>
                   <p className="text-[11px] text-slate-400 max-w-xs leading-relaxed">
-                    اضغط مباشرة على أي صنف من القائمة لإضافته فوراً إلى فاتورة المبيعات.
+                    اضغط مباشرة على أي صنف من قائمة الأصناف لإضافته فوراً إلى السلة.
                   </p>
                 </div>
               ) : (
@@ -1419,85 +1526,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 })
               )}
             </div>
-
-            {/* Bottom Primary Confirm & Print Action Button */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 space-y-3">
-              {/* Recipient Input & Order Serial Number */}
-              <div className="space-y-3">
-                {/* Document Serial Number Field (Locked Official Sequential Number) */}
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5 text-blue-600" />
-                      <span>رقم فاتورة المبيعات التسلسلي (تلقائي ومحمي):</span>
-                    </span>
-                    <span className="text-[11px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-black">
-                      تسلسلي رسمي
-                    </span>
-                  </label>
-                  <input
-                    type="text"
-                    readOnly
-                    disabled
-                    value={getNextInvoiceNo()}
-                    className="w-full px-3.5 py-2 bg-slate-100 border border-slate-300 rounded-xl text-xs font-mono font-black text-blue-950 cursor-not-allowed select-none shadow-inner"
-                  />
-                </div>
-
-                {/* Recipient Name Field */}
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center gap-1">
-                    <UserIcon className="w-3.5 h-3.5 text-blue-600" />
-                    <span>اسم المستلم / العميل (إجباري للطباعة):</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={recipientName}
-                    onChange={(e) => setRecipientName(e.target.value)}
-                    placeholder="أدخل اسم العميل أو المستلم..."
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-none transition"
-                  />
-                </div>
-              </div>
-
-              {/* Totals Summary */}
-              <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2 text-xs font-bold">
-                <div className="flex items-center justify-between text-slate-600">
-                  <span>إجمالي أصناف الفاتورة:</span>
-                  <strong className="text-blue-800 font-mono">{toArabicNumerals(cartTotals.totalItems)} صنف</strong>
-                </div>
-                <div className="flex items-center justify-between text-slate-700">
-                  <span>إجمالي الكميات المباعة:</span>
-                  <span className="text-slate-900 font-mono font-black">
-                    {toArabicNumerals(cartTotals.totalQuantity)} قطعة
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-slate-900 pt-2 border-t border-slate-200 font-extrabold">
-                  <span className="text-sm text-slate-900">المجموع الكلي للفاتورة:</span>
-                  <span className="text-base text-emerald-700 font-mono font-black">
-                    {toArabicNumerals(cartTotals.totalAmount.toLocaleString())} <span className="text-xs font-sans">ج.س</span>
-                  </span>
-                </div>
-              </div>
-
-              {!recipientName.trim() && cartItems.length > 0 && (
-                <p className="text-[11px] font-extrabold text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 text-center">
-                  ⚠️ يجب تعبئة اسم المستلم / العميل لتفعيل زر الطباعة
-                </p>
-              )}
-
-              <button
-                type="button"
-                disabled={isSubmitting || cartItems.length === 0 || !recipientName.trim()}
-                onClick={handleCompleteInvoice}
-                className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-lg shadow-emerald-100 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Printer className="w-4 h-4" />
-                <span>{isSubmitting ? 'جاري التوليد...' : 'إصدار وطباعة فاتورة المبيعات (Ctrl + P)'}</span>
-              </button>
-            </div>
-
           </div>
+
         </div>
 
       </div>
