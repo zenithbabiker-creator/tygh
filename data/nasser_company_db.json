@@ -2075,6 +2075,15 @@
   ],
   "logs": [
     {
+      "id": "log_1788433405060_milm",
+      "timestamp": "2026-09-03T11:03:25.060Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
       "id": "log_1788427387693_owhf",
       "timestamp": "2026-09-03T09:23:07.693Z",
       "username": "admin",
