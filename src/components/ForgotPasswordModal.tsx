@@ -4,22 +4,32 @@ import { Mail, KeyRound, Lock, AlertTriangle, CheckCircle2, Wifi, WifiOff, Arrow
 interface ForgotPasswordModalProps {
   isOpen: boolean;
   isOffline: boolean;
+  initialUsername?: string;
+  onPasswordChanged?: (newPassword: string, username: string) => void;
   onClose: () => void;
 }
 
 export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   isOpen,
   isOffline,
+  initialUsername = '',
+  onPasswordChanged,
   onClose,
 }) => {
   const [resetMode, setResetMode] = useState<'OFFLINE' | 'ONLINE'>(isOffline ? 'OFFLINE' : 'OFFLINE');
   const [step, setStep] = useState<1 | 2 | 3>(1); // 1 = username, 2 = verify OTP, 3 = new password
   
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(initialUsername || '');
   const [oldPassword, setOldPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  React.useEffect(() => {
+    if (isOpen && initialUsername) {
+      setUsername(initialUsername);
+    }
+  }, [isOpen, initialUsername]);
 
   const [showOldPassword, setShowOldPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -68,17 +78,27 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
 
-      if (!res.ok || !data.success) {
-        setErrorMessage(data.message || 'فشلت عملية تغيير كلمة السر، تأكد من صحة كلمة المرور القديمة');
+      if (!res.ok || !data || !data.success) {
+        setErrorMessage(data?.message || 'فشلت عملية تغيير كلمة السر، تأكد من صحة كلمة المرور الحالية');
         return;
       }
 
+      // Store locally for offline persistence
+      try {
+        localStorage.setItem(`nasser_custom_password_${username.trim().toLowerCase()}`, newPassword.trim());
+      } catch {
+        // ignore
+      }
+
       setSuccessMessage(data.message || 'تم التحقق من كلمة المرور القديمة وتحديث كلمة السر بنجاح وإلغاء القديمة تماماً!');
+      if (onPasswordChanged) {
+        onPasswordChanged(newPassword.trim(), username.trim());
+      }
+
       setTimeout(() => {
         onClose();
-        setUsername('');
         setOldPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -197,14 +217,24 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
 
-      if (!res.ok || !data.success) {
-        setErrorMessage(data.message || 'فشلت عملية تحديث كلمة السر');
+      if (!res.ok || !data || !data.success) {
+        setErrorMessage(data?.message || 'فشلت عملية تحديث كلمة السر');
         return;
       }
 
+      try {
+        localStorage.setItem(`nasser_custom_password_${username.trim().toLowerCase()}`, newPassword.trim());
+      } catch {
+        // ignore
+      }
+
       setSuccessMessage('تم تحديث كلمة السر بنجاح!');
+      if (onPasswordChanged) {
+        onPasswordChanged(newPassword.trim(), username.trim());
+      }
+
       setTimeout(() => {
         onClose();
         setStep(1);

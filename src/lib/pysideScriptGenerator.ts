@@ -520,6 +520,32 @@ def init_sqlite_db():
 # ذاكرة مؤقتة لرموز OTP
 ACTIVE_OTPS = {}
 
+def verify_py_password(stored_pass, input_pass):
+    """التحقق الذكي والشامل من كلمة المرور: المطابقة المباشرة، التجريد، وخوارزميات التشفير SHA-256 / SHA-512 / MD5"""
+    if not stored_pass or not input_pass:
+        return False
+    s = str(stored_pass).strip()
+    inp = str(input_pass).strip()
+    if stored_pass == input_pass or s == inp:
+        return True
+    try:
+        import hashlib
+        inp_sha = hashlib.sha256(inp.encode('utf-8')).hexdigest()
+        if s.lower() == inp_sha.lower():
+            return True
+        stored_sha = hashlib.sha256(s.encode('utf-8')).hexdigest()
+        if stored_sha.lower() == inp.lower():
+            return True
+        inp_sha512 = hashlib.sha512(inp.encode('utf-8')).hexdigest()
+        if s.lower() == inp_sha512.lower():
+            return True
+        inp_md5 = hashlib.md5(inp.encode('utf-8')).hexdigest()
+        if s.lower() == inp_md5.lower():
+            return True
+    except Exception:
+        pass
+    return False
+
 def add_audit_log(username, role, action, details, log_type='INFO'):
     """تسجيل حركة في سجل التدقيق SQLite مع حفظ فوري على القرص"""
     try:
@@ -892,12 +918,12 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         conn = get_db_connection()
                         try:
                             cursor = conn.cursor()
-                            cursor.execute("SELECT id, username, name, role, gmail FROM users WHERE LOWER(username)=LOWER(?) AND password=?", (username, password))
+                            cursor.execute("SELECT id, username, name, role, gmail, password FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(gmail)=LOWER(?) OR LOWER(name)=LOWER(?)", (username, username, username))
                             row = cursor.fetchone()
                         finally:
                             conn.close()
 
-                    if row:
+                    if row and verify_py_password(row[5], password):
                         user = {"id": row[0], "username": row[1], "name": row[2], "role": row[3], "gmail": row[4]}
                         add_audit_log(user['username'], user['role'], 'تسجيل دخول', f"تم تسجيل الدخول بنجاح للمستخدم {user['name']}", 'INFO')
                         return self._send_json({"success": True, "user": user, "message": "تم تسجيل الدخول بنجاح"})
@@ -977,21 +1003,26 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 username = data.get('username', '').strip()
                 old_pass = data.get('oldPassword', '').strip()
                 new_pass = data.get('newPassword', '').strip()
+                if not username or not old_pass or not new_pass or len(new_pass) < 4:
+                    return self._send_json({"success": False, "message": "يرجى تقديم اسم المستخدم، كلمة السر الحالية، والجديدة (4 أحرف على الأقل)"}, 400)
                 with DB_LOCK:
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
-                        cursor.execute("SELECT id FROM users WHERE LOWER(username)=LOWER(?) AND password=?", (username, old_pass))
+                        cursor.execute("SELECT id, username, password FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(gmail)=LOWER(?) OR LOWER(name)=LOWER(?)", (username, username, username))
                         row = cursor.fetchone()
                         if not row:
-                            return self._send_json({"success": False, "message": "كلمة السر الحالية غير صحيحة"}, 400)
+                            return self._send_json({"success": False, "message": "اسم المستخدم غير موجود بالنظام"}, 404)
+                        if not verify_py_password(row[2], old_pass):
+                            return self._send_json({"success": False, "message": "كلمة المرور الحالية غير صحيحة"}, 400)
                         cursor.execute("UPDATE users SET password=? WHERE id=?", (new_pass, row[0]))
                         commit_and_sync(conn)
+                        user_uname = row[1]
                     finally:
                         conn.close()
 
-                add_audit_log(username, 'USER', 'تغيير كلمة السر', 'تم التحقق من كلمة السر القديمة وتحديث كلمة السر بنجاح', 'SECURITY')
-                return self._send_json({"success": True, "message": "تم تحديث كلمة السر بنجاح"})
+                add_audit_log(user_uname, 'USER', 'تغيير كلمة السر', 'تم التحقق من كلمة السر القديمة وتحديث كلمة السر بنجاح', 'SECURITY')
+                return self._send_json({"success": True, "message": "تم التحقق من كلمة المرور القديمة وتحديث كلمة السر بنجاح"})
 
             # 6. Add Single Product
             if parsed_path == '/api/products':

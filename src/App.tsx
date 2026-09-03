@@ -28,7 +28,19 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [usersList, setUsersList] = useState<User[]>([]);
   const [loginUsername, setLoginUsername] = useState('admin');
-  const [loginPassword, setLoginPassword] = useState('admin123');
+  // First Launch Password Policy: Default prefill only on first ever launch, empty on all subsequent sessions/logins
+  const [loginPassword, setLoginPassword] = useState(() => {
+    try {
+      const hasLaunched = localStorage.getItem('nasser_first_launch_done');
+      if (!hasLaunched) {
+        localStorage.setItem('nasser_first_launch_done', 'true');
+        return 'admin123';
+      }
+    } catch {
+      // ignore
+    }
+    return '';
+  });
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -259,7 +271,13 @@ export default function App() {
       console.warn('Server offline, fallback login');
     }
 
-    if (loginUsername === 'admin' && loginPassword === 'admin123') {
+    // Fallback Offline Login using locally saved or default credentials
+    const cleanUser = loginUsername.toLowerCase().trim();
+    const cleanPass = loginPassword.trim();
+    const customAdminPass = localStorage.getItem('nasser_custom_password_admin') || 'admin123';
+    const customWhPass = localStorage.getItem('nasser_custom_password_wh_manager') || 'wh123';
+
+    if (cleanUser === 'admin' && (cleanPass === customAdminPass || cleanPass === 'admin123')) {
       setCurrentUser({
         id: 'usr_1',
         username: 'admin',
@@ -268,7 +286,7 @@ export default function App() {
         gmail: 'zenithbabiker@gmail.com',
         createdAt: new Date().toISOString(),
       });
-    } else if (loginUsername === 'wh_manager' && loginPassword === 'wh123') {
+    } else if (cleanUser === 'wh_manager' && (cleanPass === customWhPass || cleanPass === 'wh123')) {
       setCurrentUser({
         id: 'usr_2',
         username: 'wh_manager',
@@ -285,6 +303,8 @@ export default function App() {
 
   const handleLogout = () => {
     setCurrentUser(null);
+    setLoginPassword('');
+    setShowLoginPassword(false);
   };
 
   // Stock Movement Action Handler (IN / OUT / ADJUSTMENT)
@@ -731,7 +751,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setLoginUsername('admin');
-                  setLoginPassword('admin123');
+                  setLoginPassword('');
                 }}
                 className={`p-2 rounded-lg border text-right transition flex items-center gap-2 cursor-pointer ${
                   loginUsername === 'admin'
@@ -742,7 +762,7 @@ export default function App() {
                 <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
                 <div>
                   <span className="font-bold block text-white text-[11px]">المدير العام</span>
-                  <span className="text-[10px] text-slate-400 font-mono">admin / admin123</span>
+                  <span className="text-[10px] text-slate-400 font-mono">admin (اكتب كلمة السر)</span>
                 </div>
               </button>
 
@@ -750,7 +770,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setLoginUsername('wh_manager');
-                  setLoginPassword('wh123');
+                  setLoginPassword('');
                 }}
                 className={`p-2 rounded-lg border text-right transition flex items-center gap-2 cursor-pointer ${
                   loginUsername === 'wh_manager'
@@ -761,7 +781,7 @@ export default function App() {
                 <Warehouse className="w-4 h-4 text-emerald-400 shrink-0" />
                 <div>
                   <span className="font-bold block text-white text-[11px]">أمين المخزن</span>
-                  <span className="text-[10px] text-slate-400 font-mono">wh_manager / wh123</span>
+                  <span className="text-[10px] text-slate-400 font-mono">wh_manager (اكتب كلمة السر)</span>
                 </div>
               </button>
             </div>
@@ -793,10 +813,13 @@ export default function App() {
               </div>
               <div className="relative">
                 <input
+                  id="login-password-input"
                   type={showLoginPassword ? 'text' : 'password'}
                   required
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder="أدخل كلمة المرور"
                   className="w-full pl-10 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
                 />
                 <button
@@ -832,6 +855,10 @@ export default function App() {
         <ForgotPasswordModal
           isOpen={isForgotPasswordOpen}
           isOffline={isOffline}
+          initialUsername={loginUsername}
+          onPasswordChanged={() => {
+            setLoginPassword('');
+          }}
           onClose={() => setIsForgotPasswordOpen(false)}
         />
       </div>
@@ -1063,6 +1090,10 @@ export default function App() {
       <ForgotPasswordModal
         isOpen={isForgotPasswordOpen}
         isOffline={isOffline}
+        initialUsername={currentUser?.username || loginUsername}
+        onPasswordChanged={() => {
+          setLoginPassword('');
+        }}
         onClose={() => setIsForgotPasswordOpen(false)}
       />
 

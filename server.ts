@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
@@ -437,6 +438,58 @@ function incrementRateLimiter() {
   return getRateLimiterInfo();
 }
 
+// Password Verification & Hashing Comparison Helper
+function verifyPassword(storedPassword?: string, inputPassword?: string): boolean {
+  if (!storedPassword || !inputPassword) return false;
+  const s = String(storedPassword).trim();
+  const inp = String(inputPassword).trim();
+
+  // 1. Exact or trimmed match
+  if (storedPassword === inputPassword || s === inp) {
+    return true;
+  }
+
+  // 2. SHA-256 Hash comparison
+  try {
+    const inputSha256 = crypto.createHash('sha256').update(inp).digest('hex');
+    if (s.toLowerCase() === inputSha256.toLowerCase()) return true;
+
+    const storedSha256 = crypto.createHash('sha256').update(s).digest('hex');
+    if (storedSha256.toLowerCase() === inp.toLowerCase()) return true;
+  } catch {
+    // Ignore hash calculation error
+  }
+
+  // 3. SHA-512 Hash comparison
+  try {
+    const inputSha512 = crypto.createHash('sha512').update(inp).digest('hex');
+    if (s.toLowerCase() === inputSha512.toLowerCase()) return true;
+  } catch {
+    // Ignore
+  }
+
+  // 4. MD5 Hash comparison
+  try {
+    const inputMd5 = crypto.createHash('md5').update(inp).digest('hex');
+    if (s.toLowerCase() === inputMd5.toLowerCase()) return true;
+  } catch {
+    // Ignore
+  }
+
+  return false;
+}
+
+// User Lookup Helper by username, email or full name
+function findUserByQuery(db: DBData, query?: string) {
+  if (!query) return undefined;
+  const q = String(query).toLowerCase().trim();
+  return db.users.find(u =>
+    u.username.toLowerCase().trim() === q ||
+    (u.gmail && u.gmail.toLowerCase().trim() === q) ||
+    (u.name && u.name.toLowerCase().trim() === q)
+  );
+}
+
 // REST API ROUTES
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', company: 'شركة NASSER', system: 'إدارة المخازن', timestamp: new Date().toISOString() });
@@ -446,9 +499,9 @@ app.get('/api/health', (req, res) => {
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
   const db = readDB();
-  const user = db.users.find(u => u.username.toLowerCase() === (username || '').toLowerCase().trim());
+  const user = findUserByQuery(db, username);
 
-  if (!user || user.password !== password) {
+  if (!user || !verifyPassword(user.password, password)) {
     return res.status(401).json({ success: false, message: 'اسم المستخدم أو كلمة السر غير صحيحة' });
   }
 
@@ -470,7 +523,7 @@ app.post('/api/auth/forgot-password', (req, res) => {
   }
 
   const db = readDB();
-  const user = db.users.find(u => u.username.toLowerCase() === (username || '').toLowerCase().trim());
+  const user = findUserByQuery(db, username);
 
   if (!user) {
     return res.status(404).json({ success: false, message: 'اسم المستخدم غير موجود بالنظام' });
@@ -528,12 +581,12 @@ app.post('/api/auth/reset-password', (req, res) => {
   }
 
   const db = readDB();
-  const user = db.users.find(u => u.username === username);
+  const user = findUserByQuery(db, username);
   if (!user) {
     return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
   }
 
-  user.password = newPassword;
+  user.password = (newPassword || '').trim();
   writeDB(db);
   delete activeOtps[username];
 
@@ -547,18 +600,18 @@ app.post('/api/auth/reset-password-offline', (req, res) => {
   const { username, oldPassword, newPassword } = req.body;
 
   if (!username || !oldPassword || !newPassword || newPassword.trim().length < 4) {
-    return res.status(400).json({ success: false, message: 'يرجى تقديم اسم المستخدم، كلمة السر القديمة، وكلمة السر الجديدة' });
+    return res.status(400).json({ success: false, message: 'يرجى تقديم اسم المستخدم، كلمة السر القديمة، وكلمة السر الجديدة (4 أحرف على الأقل)' });
   }
 
   const db = readDB();
-  const user = db.users.find(u => u.username.toLowerCase() === username.toLowerCase().trim());
+  const user = findUserByQuery(db, username);
 
   if (!user) {
     return res.status(404).json({ success: false, message: 'اسم المستخدم غير موجود بالنظام' });
   }
 
-  if (user.password !== oldPassword.trim()) {
-    return res.status(400).json({ success: false, message: 'كلمة السر القديمة / الحالية غير صحيحة' });
+  if (!verifyPassword(user.password, oldPassword)) {
+    return res.status(400).json({ success: false, message: 'كلمة المرور الحالية غير صحيحة' });
   }
 
   user.password = newPassword.trim();
@@ -566,7 +619,7 @@ app.post('/api/auth/reset-password-offline', (req, res) => {
 
   addAuditLog(user.username, user.role, 'تغيير كلمة السر', 'تم التحقق من كلمة السر القديمة وتحديث كلمة السر بنجاح وإلغاء الاعتماد القديم', 'SECURITY');
 
-  res.json({ success: true, message: 'تم التحقق من كلمة السر القديمة وتحديث كلمة السر بنجاح وإلغاء القديمة تماماً!' });
+  res.json({ success: true, message: 'تم التحقق من كلمة المرور القديمة وتحديث كلمة السر بنجاح وإلغاء القديمة تماماً!' });
 });
 
 // PRODUCTS - List all
