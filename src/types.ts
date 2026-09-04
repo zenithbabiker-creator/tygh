@@ -18,7 +18,7 @@ export interface Product {
   stock: number;
   minStock: number;
   unit: string;
-  price: number; // سعر الصنف / سعر الوحدة
+  price?: number; // للتوافق العكسي فقط - تم إلغاء القيود السعرية والمالية
   description?: string;
   imageUrl?: string;
   updatedAt: string;

@@ -1,5 +1,5 @@
 /**
- * Standalone Native Python PySide6 Launcher Generator for شركة NASSER Desktop (.exe)
+ * Standalone Native Python PySide6 Launcher Generator for شركة NOSSER Desktop (.exe)
  * Uses pure PySide6 QWebEngineView + PySide6.QtPrintSupport (QPrinter, QPrintDialog)
  * with SQLite LocalAppData/Portable engine for 100% offline native Windows execution and native direct printing.
  * Zero external browser/app dependencies.
@@ -8,15 +8,15 @@
 export function generatePySideScript(): string {
   return `"""
 ====================================================================
-شركة NASSER - نظام إدارة المخازن والمبيعات وإصدار الفواتير
-تطبيق سطح المكتب الاحترافي لشركة ناصر (PySide6 Native Desktop App)
+شركة NOSSER - نظام إدارة المخازن والمخزون
+تطبيق سطح المكتب الاحترافي لشركة NOSSER (PySide6 Native Desktop App)
 - حل جذري لمشكلة ERR_EMPTY_RESPONSE و 127.0.0.1 عبر معالجة sys.stderr وخادم ThreadingHTTPServer متزامن
 - حل مشكلة المسارات والشاشة البيضاء عبر sys._MEIPASS و get_resource_path
 - قاعدة بيانات SQLite ديناميكية دائمة تحفظ البيانات أوفلاين مدى الحياة في AppData
 - معالجة تامة لأخطاء Database Lock عبر Thread Locks & SQLite WAL & busy_timeout
-- دعم مسار /api/movements/batch و /api/sales لتسجيل الفواتير في عملية ذرية واحدة
+- دعم مسار /api/movements/batch و /api/sales لتسجيل أذونات الصرف وأوامر التسليم
 - طباعة داخلية أصلية 100% عبر PySide6.QtPrintSupport (QPrinter, QPrintDialog)
-- التقاط فوري لاختصار لوحة المفاتيح (Ctrl + P) لطباعة الفاتورة مباشرة
+- التقاط فوري لاختصار لوحة المفاتيح (Ctrl + P) لطباعة أمر التسليم مباشرة
 ====================================================================
 """
 
@@ -112,20 +112,33 @@ def get_app_dir():
     # 1. Roaming AppData (أعلى مستوى أمان وثبات في ويندوز، لا يمسحه تنظيف القرص إطلاقاً)
     roaming = os.environ.get('APPDATA')
     if roaming and os.path.isdir(roaming):
-        app_dir = os.path.join(roaming, 'NasserCompanyApp')
-        os.makedirs(app_dir, exist_ok=True)
-        return app_dir
+        # فحص المجلد الجديد أو استئناف العمل من المجلد السابق بدون فقدان أي بيانات
+        nosser_dir = os.path.join(roaming, 'NosserCompanyApp')
+        nasser_dir = os.path.join(roaming, 'NasserCompanyApp')
+        if os.path.exists(nosser_dir):
+            return nosser_dir
+        if os.path.exists(nasser_dir):
+            return nasser_dir
+        os.makedirs(nosser_dir, exist_ok=True)
+        return nosser_dir
 
     # 2. Local AppData
     local_app = os.environ.get('LOCALAPPDATA')
     if local_app and os.path.isdir(local_app):
-        app_dir = os.path.join(local_app, 'NasserCompanyApp')
-        os.makedirs(app_dir, exist_ok=True)
-        return app_dir
+        nosser_dir = os.path.join(local_app, 'NosserCompanyApp')
+        nasser_dir = os.path.join(local_app, 'NasserCompanyApp')
+        if os.path.exists(nosser_dir):
+            return nosser_dir
+        if os.path.exists(nasser_dir):
+            return nasser_dir
+        os.makedirs(nosser_dir, exist_ok=True)
+        return nosser_dir
 
     # 3. مجلد المستخدم الأساسي
     user_home = os.path.expanduser('~')
-    app_dir = os.path.join(user_home, '.nasser_company')
+    app_dir = os.path.join(user_home, '.nosser_company')
+    if not os.path.exists(app_dir) and os.path.exists(os.path.join(user_home, '.nasser_company')):
+        return os.path.join(user_home, '.nasser_company')
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
 
@@ -139,22 +152,28 @@ def get_db_path():
     # 1. مسار مجلد Roaming AppData
     roaming = os.environ.get('APPDATA')
     if roaming:
+        candidates.append(os.path.join(roaming, 'NosserCompanyApp', 'nosser_store.db'))
         candidates.append(os.path.join(roaming, 'NasserCompanyApp', 'nasser_store.db'))
 
     # 2. مسار مجلد Local AppData
     local_app = os.environ.get('LOCALAPPDATA')
     if local_app:
+        candidates.append(os.path.join(local_app, 'NosserCompanyApp', 'nosser_store.db'))
         candidates.append(os.path.join(local_app, 'NasserCompanyApp', 'nasser_store.db'))
 
     # 3. مسار بجانب ملف الـ EXE (إذا كان متاحاً وقابلاً للكتابة)
     current_script_or_exe = sys.executable if getattr(sys, 'frozen', False) else (globals().get('__file__') or sys.executable or os.path.abspath('.'))
     exe_dir = os.path.dirname(os.path.abspath(current_script_or_exe))
+    local_side_db_new = os.path.join(exe_dir, 'nosser_store.db')
+    if os.path.exists(local_side_db_new) and os.access(exe_dir, os.W_OK) and ("Program Files" not in exe_dir):
+        return local_side_db_new
     local_side_db = os.path.join(exe_dir, 'nasser_store.db')
     if os.path.exists(local_side_db) and os.access(exe_dir, os.W_OK) and ("Program Files" not in exe_dir):
         return local_side_db
 
     # 4. مسار مجلد المستخدم
     user_home = os.path.expanduser('~')
+    candidates.append(os.path.join(user_home, '.nosser_company', 'nosser_store.db'))
     candidates.append(os.path.join(user_home, '.nasser_company', 'nasser_store.db'))
 
     # فحص أي ملف موجود مسبقاً لاستئناف القراءة منه مباشرة وعدم مسح بيانات المستخدم
@@ -164,7 +183,7 @@ def get_db_path():
 
     # إذا لم تكن هناك قاعدة بيانات سابقة، يتم اعتماد المسار الدائم الأساسي في Roaming AppData
     primary_dir = get_app_dir()
-    return os.path.join(primary_dir, 'nasser_store.db')
+    return os.path.join(primary_dir, 'nosser_store.db')
 
 def get_db_connection():
     """
@@ -471,7 +490,7 @@ def init_sqlite_db():
                     seq_counter = 1
                     for grp_cat, grp_items in official_seed_groups:
                         for grp_name in grp_items:
-                            p_code = f"NASSER-{100 + seq_counter}"
+                            p_code = f"NOSSER-{100 + seq_counter}"
                             cursor.execute('''
                                 INSERT INTO products (code, name, category, stock, min_stock, unit, price, unit_price, description, updated_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -649,7 +668,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>شركة NASSER - جاري تشغيل النظام</title>
+    <title>شركة NOSSER - جاري تشغيل النظام</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
         .card { background: #1e293b; padding: 2.5rem; border-radius: 1rem; border: 1px solid #334155; text-align: center; max-width: 480px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
@@ -662,8 +681,8 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 </head>
 <body>
     <div class="card">
-        <div class="logo">شركة NASSER</div>
-        <div class="sub">نظام إدارة المخازن والمبيعات - جاري تهيئة الاتصال المحلي...</div>
+        <div class="logo">شركة NOSSER</div>
+        <div class="sub">نظام إدارة المخازن والمخزون - جاري تهيئة الاتصال المحلي...</div>
         <div class="spinner"></div>
         <button class="btn" onclick="location.reload()">تحديث الصفحة الآن</button>
     </div>
@@ -747,7 +766,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             
             # 0. Health Check
             if parsed_path == '/api/health':
-                return self._send_json({"status": "ok", "company": "شركة NASSER", "system": "إدارة المخازن والمبيعات", "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')})
+                return self._send_json({"status": "ok", "company": "شركة NOSSER", "system": "إدارة المخازن والمخزون", "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')})
 
             # 1. API GET Products
             if parsed_path == '/api/products':
@@ -766,7 +785,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         p_id_raw = r[0]
                         p_rowid = r[10]
                         final_id = str(p_id_raw) if (p_id_raw is not None and str(p_id_raw).strip() not in ('', 'None', 'none', 'null', 'undefined')) else str(p_rowid)
-                        p_code = r[1] or f"NASSER-{final_id}"
+                        p_code = r[1] or f"NOSSER-{final_id}"
+                        if p_code.startswith('NASSER-'):
+                            p_code = p_code.replace('NASSER-', 'NOSSER-')
                         products.append({
                             "id": final_id,
                             "code": p_code,
@@ -1057,14 +1078,14 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                     pass
 
                             if not code:
-                                code = f"NASSER-{max_num + 1}"
-                            elif not code.upper().startswith('NASSER-'):
-                                code = f"NASSER-{code}"
+                                code = f"NOSSER-{max_num + 1}"
+                            elif not code.upper().startswith('NOSSER-'):
+                                code = f"NOSSER-{code.replace('NASSER-', '')}"
                             
                             # Handle unique constraint collision
                             cursor.execute("SELECT COUNT(*) FROM products WHERE code=?", (code,))
                             if cursor.fetchone()[0] > 0:
-                                code = f"NASSER-{max_num + 1}_{int(time.time()) % 100}"
+                                code = f"NOSSER-{max_num + 1}_{int(time.time()) % 100}"
 
                             # Explicitly calculate and insert ID to ensure compatibility even if table was created without AUTOINCREMENT
                             cursor.execute("SELECT MAX(CAST(id AS INTEGER)), MAX(rowid) FROM products")
@@ -1096,7 +1117,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         "stock": stock_val, "minStock": min_stock, "unit": unit, "price": price_val,
                         "description": desc, "updatedAt": now_iso
                     }
-                    add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'إضافة صنف جديد', f"تم تسجيل الصنف ({name}) بكود [{code}] ورصيد {stock_val} بسعر {price_val}", 'MOVEMENT')
+                    add_audit_log(data.get('username') or 'المدير العام', data.get('role') or 'GENERAL_MANAGER', 'إضافة صنف جديد', f"تم تسجيل الصنف ({name}) بكود [{code}] ورصيد {stock_val}", 'MOVEMENT')
                     return self._send_json({"success": True, "product": new_product, "message": "تم إضافة الصنف بنجاح وحفظه فوراً في قاعدة البيانات"})
                 except Exception as e:
                     return self._send_json({"success": False, "message": str(e)}, 500)
@@ -1133,9 +1154,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                                 max_num += 1
                                 raw_code = (itm.get('code') or '').strip()
                                 if not raw_code:
-                                    p_code = f"NASSER-{max_num}"
-                                elif not raw_code.upper().startswith('NASSER-'):
-                                    p_code = f"NASSER-{raw_code}"
+                                    p_code = f"NOSSER-{max_num}"
+                                elif not raw_code.upper().startswith('NOSSER-'):
+                                    p_code = f"NOSSER-{raw_code.replace('NASSER-', '')}"
                                 else:
                                     p_code = raw_code
                                 
@@ -1402,8 +1423,8 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         finally:
                             conn.close()
 
-                    add_audit_log(cashier_name, 'WAREHOUSE_MANAGER', 'تسجيل فاتورة', f"تم تسجيل فاتورة مبيعات رقم [{invoice_num}] بقيمة {total}", 'MOVEMENT')
-                    return self._send_json({"success": True, "invoiceNumber": invoice_num, "message": "تم حفظ الفاتورة بنجاح"})
+                    add_audit_log(cashier_name, 'WAREHOUSE_MANAGER', 'تسجيل أمر تسليم مخزن', f"تم تسجيل أمر تسليم مخزن رقم [{invoice_num}] بنجاح", 'MOVEMENT')
+                    return self._send_json({"success": True, "invoiceNumber": invoice_num, "message": "تم حفظ أمر التسليم بنجاح"})
                 except Exception as e:
                     return self._send_json({"success": False, "message": str(e)}, 500)
 
@@ -1452,9 +1473,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                             raw_code = (data.get('code') or old_code).strip()
                             if not raw_code:
-                                p_code = f"NASSER-{actual_id}"
-                            elif not raw_code.upper().startswith('NASSER-'):
-                                p_code = f"NASSER-{raw_code}"
+                                p_code = f"NOSSER-{actual_id}"
+                            elif not raw_code.upper().startswith('NOSSER-'):
+                                p_code = f"NOSSER-{raw_code.replace('NASSER-', '')}"
                             else:
                                 p_code = raw_code
 
@@ -1581,7 +1602,7 @@ try:
             super().__init__()
             self.app_url = app_url
             self.retry_count = 0
-            self.setWindowTitle("شركة NASSER - نظام إدارة المخازن والمبيعات وإصدار الفواتير")
+            self.setWindowTitle("شركة NOSSER - نظام إدارة المخازن والمخزون")
             self.resize(1366, 850)
             
             # ضبط خصائص ثبات النافذة
@@ -1652,7 +1673,7 @@ try:
                 
                 # فتح حوار خيارات الطباعة الأصلي الداخلي (Native Print Dialog)
                 print_dialog = QPrintDialog(printer, self)
-                print_dialog.setWindowTitle("خيارات الطباعة الداخلية - شركة ناصر")
+                print_dialog.setWindowTitle("خيارات الطباعة الداخلية - شركة NOSSER")
                 print_dialog.setAttribute(Qt.WA_NativeWindow, True)
                 print_dialog.setWindowModality(Qt.ApplicationModal)
                 
@@ -1662,7 +1683,7 @@ try:
                 print("Native Print Error:", pe)
                 # في حال عدم وجود طابعة فيزيائية معرفة، حفظ المستند داخلياً كملف PDF
                 try:
-                    save_dialog = QFileDialog(self, "حفظ المستند كملف PDF داخلي", os.path.expanduser("~/Desktop/Invoice.pdf"), "PDF Files (*.pdf)")
+                    save_dialog = QFileDialog(self, "حفظ المستند كملف PDF داخلي", os.path.expanduser("~/Desktop/DeliveryOrder.pdf"), "PDF Files (*.pdf)")
                     save_dialog.setAttribute(Qt.WA_NativeWindow, True)
                     save_dialog.setWindowModality(Qt.ApplicationModal)
                     save_dialog.setAcceptMode(QFileDialog.AcceptSave)
@@ -1676,7 +1697,7 @@ try:
                             msg.setAttribute(Qt.WA_NativeWindow, True)
                             msg.setWindowModality(Qt.ApplicationModal)
                             msg.setWindowTitle("تم الحفظ بنجاح")
-                            msg.setText(f"تم حفظ الفاتورة كملف PDF في المسار:\\n{pdf_path}")
+                            msg.setText(f"تم حفظ أمر التسليم كملف PDF في المسار:\\n{pdf_path}")
                             msg.setIcon(QMessageBox.Information)
                             msg.exec()
                 except Exception as save_err:
@@ -1733,7 +1754,7 @@ def main():
         ])
         
         app = QApplication(sys.argv)
-        app.setApplicationName("شركة NASSER - إدارة المخازن والمبيعات")
+        app.setApplicationName("شركة NOSSER - إدارة المخازن والمخزون")
         
         main_win = NasserMainWindow(app_url)
         main_win.showMaximized()

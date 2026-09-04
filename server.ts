@@ -12,7 +12,8 @@ app.use(express.json({ limit: '10mb' }));
 
 // File DB Path for Offline Core Persistence
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'nasser_company_db.json');
+const OLD_DB_FILE = path.join(DATA_DIR, 'nasser_company_db.json');
+const DB_FILE = path.join(DATA_DIR, 'nosser_company_db.json');
 
 // Interface Definitions for Backend
 interface User {
@@ -33,7 +34,7 @@ interface Product {
   stock: number;
   minStock: number;
   unit: string;
-  price: number;
+  price?: number;
   description?: string;
   updatedAt: string;
 }
@@ -224,7 +225,7 @@ function buildInitialProducts(): Product[] {
     for (const name of cat.items) {
       prods.push({
         id: String(seq),
-        code: `NASSER-${100 + seq}`,
+        code: `NOSSER-${100 + seq}`,
         name: name.trim(),
         category: cat.category,
         stock: 10,
@@ -284,14 +285,14 @@ const DEFAULT_DB: DBData = {
       username: 'النظام',
       role: 'GENERAL_MANAGER',
       action: 'تشغيل النظام',
-      details: 'تم بدء تشغيل قاعدة بيانات إدارة المخازن والمخزون لشركة NASSER بنجاح وتثبيت الأصناف المعتمدة',
+      details: 'تم بدء تشغيل قاعدة بيانات إدارة المخازن والمخزون لشركة NOSSER بنجاح وتثبيت الأصناف المعتمدة',
       type: 'INFO',
     },
   ],
   settings: {
     googleSheetUrl: 'https://docs.google.com/spreadsheets/d/1NasserCompanyConfig/edit#gid=0',
     rateLimitThreshold: 15,
-    appName: 'شركة NASSER - نظام إدارة المخازن والمخزون',
+    appName: 'شركة NOSSER - نظام إدارة المخازن والمخزون',
     companyAddress: 'أمدرمان',
     companyPhone: '0913247564',
   },
@@ -302,6 +303,15 @@ function readDB(): DBData {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    // Backward compatibility: If old DB file exists but new one doesn't, migrate it
+    if (!fs.existsSync(DB_FILE) && fs.existsSync(OLD_DB_FILE)) {
+      try {
+        const oldContent = fs.readFileSync(OLD_DB_FILE, 'utf-8');
+        fs.writeFileSync(DB_FILE, oldContent, 'utf-8');
+      } catch {
+        // Fallback
+      }
     }
     if (!fs.existsSync(DB_FILE)) {
       fs.writeFileSync(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2), 'utf-8');
@@ -340,13 +350,13 @@ function readDB(): DBData {
       writeDB(db);
     }
 
-    // Startup Data Migration Check: Ensure all products and movements strictly follow 'NASSER-' prefix
+    // Startup Data Migration Check: Ensure all products and movements strictly follow 'NOSSER-' prefix
     let migratedPrefixCount = 0;
     db.products.forEach(p => {
-      if (!p.code || !p.code.startsWith('NASSER-')) {
+      if (!p.code || !p.code.startsWith('NOSSER-')) {
         const oldCode = p.code || '';
         const cleanedNum = oldCode.replace(/\D/g, '') || p.id;
-        p.code = `NASSER-${cleanedNum}`;
+        p.code = `NOSSER-${cleanedNum}`;
         migratedPrefixCount++;
         // Update movements referencing the old code
         db.movements.forEach(m => {
@@ -358,7 +368,13 @@ function readDB(): DBData {
     });
 
     if (migratedPrefixCount > 0) {
-      console.log(`🔄 Standardized ${migratedPrefixCount} product codes to strict 'NASSER-' prefix format.`);
+      console.log(`🔄 Standardized ${migratedPrefixCount} product codes to strict 'NOSSER-' prefix format.`);
+      writeDB(db);
+    }
+
+    // Ensure appName is updated
+    if (db.settings && (!db.settings.appName || db.settings.appName.includes('NASSER'))) {
+      db.settings.appName = 'شركة NOSSER - نظام إدارة المخازن والمخزون';
       writeDB(db);
     }
 
@@ -492,7 +508,7 @@ function findUserByQuery(db: DBData, query?: string) {
 
 // REST API ROUTES
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', company: 'شركة NASSER', system: 'إدارة المخازن', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', company: 'شركة NOSSER', system: 'إدارة المخازن', timestamp: new Date().toISOString() });
 });
 
 // AUTH - Login
@@ -628,7 +644,7 @@ app.get('/api/products', (req, res) => {
   const sanitized = (db.products || []).map((p, idx) => ({
     ...p,
     id: p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase()) ? String(p.id) : String(idx + 1),
-    code: p.code && p.code.startsWith('NASSER-') ? p.code : `NASSER-${p.code || p.id || idx + 101}`,
+    code: p.code && p.code.startsWith('NOSSER-') ? p.code : `NOSSER-${p.code ? p.code.replace(/^NASSER-/, '') : p.id || idx + 101}`,
   }));
   res.json({ success: true, products: sanitized });
 });
@@ -647,19 +663,18 @@ app.post('/api/products', (req, res) => {
   if (!productCode) {
     let maxNum = 100;
     db.products.forEach(p => {
-      const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
         const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > maxNum) maxNum = num;
       }
     });
-    productCode = `NASSER-${maxNum + 1}`;
-  } else if (!productCode.startsWith('NASSER-')) {
-    productCode = `NASSER-${productCode}`;
+    productCode = `NOSSER-${maxNum + 1}`;
+  } else if (!productCode.startsWith('NOSSER-')) {
+    productCode = productCode.startsWith('NASSER-') ? productCode.replace(/^NASSER-/, 'NOSSER-') : `NOSSER-${productCode}`;
   }
 
   const initialStock = Math.max(0, Number(stock) || 0);
-  const initialPrice = Math.max(0, Number(price) || 0);
 
   const nextId = String(db.products.reduce((max, p) => Math.max(max, parseInt(p.id, 10) || 0), 0) + 1);
 
@@ -669,7 +684,6 @@ app.post('/api/products', (req, res) => {
     name: name.trim(),
     category: category || 'عام',
     stock: initialStock,
-    price: initialPrice,
     minStock: Number(minStock) || 5,
     unit: unit || 'وحدة',
     description: description || '',
@@ -702,7 +716,7 @@ app.post('/api/products', (req, res) => {
     username || 'المدير العام',
     role || 'GENERAL_MANAGER',
     'إضافة صنف جديد للمخزن',
-    `تم تسجيل الصنف (${newProduct.name}) بكود [${newProduct.code}] ورصيد افتتاحي ${initialStock} ${newProduct.unit} بسعر ${initialPrice}`,
+    `تم تسجيل الصنف (${newProduct.name}) بكود [${newProduct.code}] ورصيد افتتاحي ${initialStock} ${newProduct.unit}`,
     'MOVEMENT'
   );
 
@@ -726,7 +740,7 @@ app.post('/api/products/batch', (req, res) => {
   // Find baseline numeric serial code
   let maxNum = 100;
   db.products.forEach(p => {
-    const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
+    const match = p.code.match(/^(?:NOSSER-|NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
     if (match) {
       const num = parseInt(match[1] || match[0], 10);
       if (!isNaN(num) && num > maxNum) maxNum = num;
@@ -743,12 +757,11 @@ app.post('/api/products/batch', (req, res) => {
 
     maxNum += 1;
     currentMaxId += 1;
-    let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NASSER-${maxNum}`;
-    if (!finalCode.startsWith('NASSER-')) {
-      finalCode = `NASSER-${finalCode}`;
+    let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NOSSER-${maxNum}`;
+    if (!finalCode.startsWith('NOSSER-')) {
+      finalCode = finalCode.startsWith('NASSER-') ? finalCode.replace(/^NASSER-/, 'NOSSER-') : `NOSSER-${finalCode}`;
     }
     const initialStock = Math.max(0, Number(item.stock) || 0);
-    const itemPrice = Math.max(0, Number(item.price) || 0);
 
     const newProd: Product = {
       id: String(currentMaxId),
@@ -756,7 +769,6 @@ app.post('/api/products/batch', (req, res) => {
       name: item.name.trim(),
       category: item.category || 'عام',
       stock: initialStock,
-      price: itemPrice,
       minStock: Number(item.minStock) || 5,
       unit: item.unit || 'وحدة',
       description: item.description || '',
@@ -790,7 +802,7 @@ app.post('/api/products/batch', (req, res) => {
     username || 'المدير العام',
     role || 'GENERAL_MANAGER',
     'إضافة أصناف دفعة واحدة للمخزن (Excel Batch)',
-    `تم تسجيل عدد (${createdProducts.length}) صنف مخزني جديد بنجاح وتحديث الأكواد والرصيد والأسعار`,
+    `تم تسجيل عدد (${createdProducts.length}) صنف مخزني جديد بنجاح وتحديث الأكواد والرصيد بالمخزن`,
     'MOVEMENT'
   );
 
@@ -822,12 +834,10 @@ app.put('/api/products/:id', (req, res) => {
   const oldProd = db.products[index];
   const rawStock = Number(stock);
   const newStock = !isNaN(rawStock) ? Math.max(0, rawStock) : oldProd.stock;
-  const rawPrice = Number(price);
-  const newPrice = !isNaN(rawPrice) ? Math.max(0, rawPrice) : (oldProd.price || 0);
 
   let newCode = (code || oldProd.code).trim();
-  if (!newCode.startsWith('NASSER-')) {
-    newCode = `NASSER-${newCode}`;
+  if (!newCode.startsWith('NOSSER-')) {
+    newCode = newCode.startsWith('NASSER-') ? newCode.replace(/^NASSER-/, 'NOSSER-') : `NOSSER-${newCode}`;
   }
 
   // If stock was modified directly, record movement log
@@ -855,7 +865,6 @@ app.put('/api/products/:id', (req, res) => {
     name: (name || oldProd.name).trim(),
     category: category || oldProd.category || 'عام',
     stock: newStock,
-    price: newPrice,
     minStock: Number(minStock) || oldProd.minStock || 5,
     unit: unit || oldProd.unit || 'وحدة',
     description: description !== undefined ? description : oldProd.description,
@@ -868,7 +877,7 @@ app.put('/api/products/:id', (req, res) => {
     username || 'المدير العام',
     role || 'GENERAL_MANAGER',
     'تعديل بيانات صنف',
-    `تم تحديث بيانات الصنف (${db.products[index].name})، الرصيد: ${db.products[index].stock}، السعر: ${db.products[index].price}`,
+    `تم تحديث بيانات الصنف (${db.products[index].name})، الرصيد الحالي: ${db.products[index].stock} ${db.products[index].unit}`,
     'INFO'
   );
 
@@ -1163,8 +1172,8 @@ app.post('/api/sales', (req, res) => {
   addAuditLog(
     newSale.cashierName,
     'WAREHOUSE_MANAGER',
-    'تسجيل فاتورة مبيعات',
-    `تم تسجيل فاتورة مبيعات رقم [${invNum}] بمبلغ إجمالي ${newSale.total}`,
+    'تسجيل أمر تسليم مخزن',
+    `تم تسجيل وتوثيق أمر تسليم مخزن رقم [${invNum}] وخصم الأصناف من الرصيد بنجاح`,
     'MOVEMENT'
   );
 
@@ -1281,7 +1290,7 @@ app.post('/api/ai/diagnose', async (req, res) => {
     } else {
       diagnosisText = `[تقرير الفحص والتشخيص الفني للمخزن]
 - حالة الفحص: تم التحقق الذاتي بنجاح
-- النتيجة الفنية للصنف: خالي من العيوب، مطابق لمعايير الجودة والتخزين لشركة NASSER، التغليف سليم وفي حالة جيدة.`;
+- النتيجة الفنية للصنف: خالي من العيوب، مطابق لمعايير الجودة والتخزين لشركة NOSSER، التغليف سليم وفي حالة جيدة.`;
     }
 
     res.json({
@@ -1316,7 +1325,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`====================================================`);
-    console.log(`🏢 شركة NASSER - نظام إدارة المخازن والمخزون يعمل على Port ${PORT}`);
+    console.log(`🏢 شركة NOSSER - نظام إدارة المخازن والمخزون يعمل على Port ${PORT}`);
     console.log(`====================================================`);
   });
 }
