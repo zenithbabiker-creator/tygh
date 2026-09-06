@@ -21,8 +21,7 @@ import {
   Eye,
   EyeOff,
   LogOut,
-  PackageCheck,
-  RefreshCw
+  PackageCheck
 } from 'lucide-react';
 
 export default function App() {
@@ -46,7 +45,6 @@ export default function App() {
     } catch {}
     return null;
   });
-  const [isSwitchingWarehouse, setIsSwitchingWarehouse] = useState(false);
 
   // Guarantee password is empty on mount and session resume
   useEffect(() => {
@@ -91,25 +89,36 @@ export default function App() {
   };
 
   // Application State
-  const DEFAULT_PRODUCTS: Product[] = INITIAL_PRODUCTS;
+  const DEFAULT_PRODUCTS: Product[] = INITIAL_PRODUCTS.map(p => ({
+    ...p,
+    warehouseId: 'EASTERN' as const,
+    warehouseName: 'المخزن الشرقي',
+  }));
 
   const [products, setProducts] = useState<Product[]>(() => {
     try {
-      const savedV5 = localStorage.getItem('nasser_warehouse_products_v5');
-      if (savedV5) {
-        const parsed = JSON.parse(savedV5);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      // Version 4.0.0 cleanup: clean previous cross-warehouse cache
+      const v4Clean = localStorage.getItem('nosser_v4_migrated');
+      if (!v4Clean) {
+        localStorage.removeItem('nasser_warehouse_products_v5');
+        localStorage.removeItem('nasser_warehouse_products_v4');
+        localStorage.removeItem('nasser_warehouse_products_v3');
+        localStorage.removeItem('nasser_warehouse_movements_v5');
+        localStorage.setItem('nosser_v4_migrated', 'true');
+        const easternInit = DEFAULT_PRODUCTS;
+        localStorage.setItem('nosser_products_EASTERN', JSON.stringify(easternInit));
+        localStorage.setItem('nosser_products_WESTERN', JSON.stringify([]));
+        localStorage.setItem('nosser_products_AUXILIARY', JSON.stringify([]));
+        return easternInit;
       }
-      const savedV4 = localStorage.getItem('nasser_warehouse_products_v4');
-      if (savedV4) {
-        const parsed = JSON.parse(savedV4);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const active = localStorage.getItem('nosser_active_warehouse');
+      if (active && ['EASTERN', 'WESTERN', 'AUXILIARY'].includes(active)) {
+        const saved = localStorage.getItem(`nosser_products_${active}`);
+        if (saved) return JSON.parse(saved);
+        if (active !== 'EASTERN') return [];
       }
-      const savedV3 = localStorage.getItem('nasser_warehouse_products_v3');
-      if (savedV3) {
-        const parsed = JSON.parse(savedV3);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
+      const savedEastern = localStorage.getItem('nosser_products_EASTERN');
+      if (savedEastern) return JSON.parse(savedEastern);
     } catch {
       // Fallback
     }
@@ -582,7 +591,8 @@ export default function App() {
               const filtered = prev.filter(p => String(p.id) !== savedProd.id && p.code !== savedProd.code);
               const updated = [savedProd, ...filtered];
               try {
-                localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+                const targetWh = savedProd.warehouseId || selectedWarehouse || 'EASTERN';
+                localStorage.setItem(`nosser_products_${targetWh}`, JSON.stringify(updated));
               } catch (e) {}
               return updated;
             });
@@ -599,6 +609,7 @@ export default function App() {
       console.warn('Adding product locally');
     }
 
+    const currentWh = selectedWarehouse || 'EASTERN';
     const newProd: Product = {
       id: 'prd_' + Date.now(),
       code: productData.code || 'NOSSER-' + (products.length + 101),
@@ -608,15 +619,17 @@ export default function App() {
       minStock: Number(productData.minStock) || 5,
       unit: productData.unit || 'وحدة',
       price: Number(productData.price) || 0,
-      warehouseId: selectedWarehouse || 'EASTERN',
-      warehouseName: selectedWarehouse ? WAREHOUSES[selectedWarehouse]?.name : 'المخزن الشرقي',
+      warehouseId: currentWh,
+      warehouseName: WAREHOUSES[currentWh]?.name || 'المخزن الشرقي',
       description: productData.description || '',
       updatedAt: new Date().toISOString(),
     };
 
     setProducts(prev => {
       const updated = [newProd, ...prev];
-      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+      try {
+        localStorage.setItem(`nosser_products_${currentWh}`, JSON.stringify(updated));
+      } catch (e) {}
       return updated;
     });
 
@@ -625,6 +638,7 @@ export default function App() {
 
   // Batch Add Products
   const handleBatchAddProducts = async (items: Array<{ code?: string; name: string; stock: number; price?: number; category?: string; minStock?: number; unit?: string; description?: string; warehouseId?: WarehouseId; warehouseName?: string }>) => {
+    const currentWh = selectedWarehouse || 'EASTERN';
     try {
       const res = await safeJsonFetch('/api/products/batch', {
         method: 'POST',
@@ -632,11 +646,11 @@ export default function App() {
         body: JSON.stringify({
           items: items.map(itm => ({
             ...itm,
-            warehouseId: itm.warehouseId || selectedWarehouse || 'EASTERN',
-            warehouseName: itm.warehouseName || (selectedWarehouse ? WAREHOUSES[selectedWarehouse]?.name : 'المخزن الشرقي'),
+            warehouseId: itm.warehouseId || currentWh,
+            warehouseName: itm.warehouseName || WAREHOUSES[currentWh]?.name || 'المخزن الشرقي',
           })),
-          warehouseId: selectedWarehouse || 'EASTERN',
-          warehouseName: selectedWarehouse ? WAREHOUSES[selectedWarehouse]?.name : 'المخزن الشرقي',
+          warehouseId: currentWh,
+          warehouseName: WAREHOUSES[currentWh]?.name || 'المخزن الشرقي',
           username: currentUser?.username,
           role: currentUser?.role,
         }),
@@ -653,6 +667,8 @@ export default function App() {
             price: Number(p.price) || 0,
             minStock: Number(p.minStock) || 5,
             unit: p.unit || 'وحدة',
+            warehouseId: p.warehouseId || currentWh,
+            warehouseName: p.warehouseName || WAREHOUSES[currentWh]?.name || 'المخزن الشرقي',
             description: p.description || '',
             updatedAt: p.updatedAt || new Date().toISOString(),
           }));
@@ -660,7 +676,7 @@ export default function App() {
             const addedIds = new Set(newAddedList.map(p => p.id));
             const updated = [...newAddedList, ...prev.filter(p => !addedIds.has(String(p.id)))];
             try {
-              localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+              localStorage.setItem(`nosser_products_${currentWh}`, JSON.stringify(updated));
             } catch (e) {}
             return updated;
           });
@@ -675,9 +691,10 @@ export default function App() {
     }
 
     // Local fallback
+    const prefixLetter = currentWh === 'WESTERN' ? 'W' : currentWh === 'AUXILIARY' ? 'A' : 'E';
     let maxNum = 100;
     products.forEach(p => {
-      const match = p.code.match(/^(?:NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(?:[EWA])?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
         const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > maxNum) maxNum = num;
@@ -690,9 +707,9 @@ export default function App() {
     items.forEach((item, index) => {
       if (!item.name || !item.name.trim()) return;
       maxNum += 1;
-      let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NASSER-${maxNum}`;
-      if (!finalCode.startsWith('NASSER-')) {
-        finalCode = `NASSER-${finalCode}`;
+      let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NOSSER-${prefixLetter}${maxNum}`;
+      if (!finalCode.startsWith('NOSSER-')) {
+        finalCode = `NOSSER-${finalCode}`;
       }
       const stockVal = Math.max(0, Number(item.stock) || 0);
 
@@ -705,6 +722,8 @@ export default function App() {
         minStock: Number(item.minStock) || 5,
         unit: item.unit || 'وحدة',
         price: Number(item.price) || 0,
+        warehouseId: currentWh,
+        warehouseName: WAREHOUSES[currentWh]?.name || 'المخزن الشرقي',
         description: item.description || '',
         updatedAt: now,
       });
@@ -712,7 +731,9 @@ export default function App() {
 
     setProducts(prev => {
       const updated = [...newProds, ...prev];
-      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+      try {
+        localStorage.setItem(`nosser_products_${currentWh}`, JSON.stringify(updated));
+      } catch (e) {}
       return updated;
     });
 
@@ -721,6 +742,7 @@ export default function App() {
 
   // Update Product
   const handleUpdateProduct = async (id: string, productData: Partial<Product>) => {
+    const currentWh = selectedWarehouse || 'EASTERN';
     try {
       const res = await safeJsonFetch(`/api/products/${id}`, {
         method: 'PUT',
@@ -748,7 +770,9 @@ export default function App() {
 
     setProducts(prev => {
       const updated = prev.map(p => (p.id === id || p.code === id) ? { ...p, ...productData } : p);
-      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+      try {
+        localStorage.setItem(`nosser_products_${currentWh}`, JSON.stringify(updated));
+      } catch (e) {}
       return updated;
     });
 
@@ -757,6 +781,7 @@ export default function App() {
 
   // Delete Product
   const handleDeleteProduct = async (id: string) => {
+    const currentWh = selectedWarehouse || 'EASTERN';
     try {
       const res = await safeJsonFetch(`/api/products/${id}?username=${currentUser?.username}&role=${currentUser?.role}`, {
         method: 'DELETE',
@@ -777,7 +802,9 @@ export default function App() {
 
     setProducts(prev => {
       const updated = prev.filter(p => p.id !== id && p.code !== id);
-      localStorage.setItem('nasser_warehouse_products_v5', JSON.stringify(updated));
+      try {
+        localStorage.setItem(`nosser_products_${currentWh}`, JSON.stringify(updated));
+      } catch (e) {}
       return updated;
     });
 
@@ -1023,7 +1050,7 @@ export default function App() {
                   شركة <span className="text-blue-400">NOSSER</span>
                 </h1>
                 <span className="text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 px-1.5 py-0.2 rounded-md">
-                  v3.0.1
+                  v4.0.0
                 </span>
               </div>
               <p className="text-[10px] text-blue-400 mt-0.5 font-bold tracking-widest uppercase">
@@ -1035,7 +1062,7 @@ export default function App() {
 
         {/* Dedicated Active Warehouse Card in Sidebar */}
         <div className="px-4 pt-4 pb-2">
-          <div className={`p-3.5 rounded-2xl border text-right space-y-2.5 transition-all shadow-md ${
+          <div className={`p-3.5 rounded-2xl border text-right space-y-2 transition-all shadow-md ${
             selectedWarehouse === 'EASTERN'
               ? 'bg-gradient-to-br from-blue-950/70 to-slate-900 border-blue-600/40 text-blue-200'
               : selectedWarehouse === 'WESTERN'
@@ -1066,16 +1093,6 @@ export default function App() {
                 {WAREHOUSES[selectedWarehouse]?.tagline}
               </p>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setIsSwitchingWarehouse(true)}
-              className="w-full py-2 px-3 bg-slate-800/90 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer border border-slate-700 hover:border-slate-500 shadow-xs"
-              title="تغيير المخزن النشط"
-            >
-              <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
-              <span>تغيير المخزن النشط</span>
-            </button>
           </div>
         </div>
 
@@ -1207,22 +1224,7 @@ export default function App() {
               <Building2 className={`w-4 h-4 ${
                 selectedWarehouse === 'EASTERN' ? 'text-blue-600' : selectedWarehouse === 'WESTERN' ? 'text-emerald-600' : 'text-amber-600'
               }`} />
-              <span className="hidden sm:inline">{WAREHOUSES[selectedWarehouse]?.name}</span>
-              <button
-                type="button"
-                onClick={() => setIsSwitchingWarehouse(true)}
-                className={`text-[11px] px-2 py-0.5 rounded-md font-bold transition flex items-center gap-1 cursor-pointer border ${
-                  selectedWarehouse === 'EASTERN'
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-500'
-                    : selectedWarehouse === 'WESTERN'
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500'
-                    : 'bg-amber-600 hover:bg-amber-700 text-white border-amber-500'
-                }`}
-                title="تبديل إلى مخزن آخر"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>تبديل</span>
-              </button>
+              <span>{WAREHOUSES[selectedWarehouse]?.name}</span>
             </div>
 
             {/* Active User Badge */}
@@ -1275,7 +1277,6 @@ export default function App() {
               currentUser={currentUser}
               movements={movements}
               activeWarehouse={selectedWarehouse}
-              onSwitchWarehouse={() => setIsSwitchingWarehouse(true)}
               onAddProduct={handleAddProduct}
               onBatchAddProducts={handleBatchAddProducts}
               onUpdateProduct={handleUpdateProduct}
@@ -1321,24 +1322,6 @@ export default function App() {
         </footer>
 
       </main>
-
-      {/* Switch Warehouse Modal Overlay */}
-      {isSwitchingWarehouse && (
-        <WarehouseSelectorScreen
-          currentUser={currentUser}
-          products={products}
-          selectedWarehouse={selectedWarehouse}
-          canDismiss={true}
-          onDismiss={() => setIsSwitchingWarehouse(false)}
-          onSelectWarehouse={(whId) => {
-            setSelectedWarehouse(whId);
-            setIsSwitchingWarehouse(false);
-            try {
-              localStorage.setItem('nosser_active_warehouse', whId);
-            } catch {}
-          }}
-        />
-      )}
 
       {/* Modals */}
       <ForgotPasswordModal

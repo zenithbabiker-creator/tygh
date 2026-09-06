@@ -89,6 +89,7 @@ interface SaleRecord {
 }
 
 interface DBData {
+  version?: string;
   users: User[];
   products: Product[];
   movements: StockMovement[];
@@ -225,8 +226,6 @@ const NEW_SEED_CATEGORIES = [
 
 const SEED_WAREHOUSES = [
   { id: 'EASTERN', name: 'المخزن الشرقي', prefix: 'E', stock: 15 },
-  { id: 'WESTERN', name: 'المخزن الغربي', prefix: 'W', stock: 12 },
-  { id: 'AUXILIARY', name: 'المخزن الإضافي', prefix: 'A', stock: 8 },
 ];
 
 function buildInitialProducts(): Product[] {
@@ -262,6 +261,7 @@ function buildInitialProducts(): Product[] {
 const DEFAULT_PRODUCTS = buildInitialProducts();
 
 const DEFAULT_DB: DBData = {
+  version: '4.0.0',
   users: [
     {
       id: 'usr_1',
@@ -395,45 +395,36 @@ function readDB(): DBData {
       }
     });
 
-    // If WESTERN or AUXILIARY is missing in products, clone catalog for them
-    const hasWestern = db.products.some(p => p.warehouseId === 'WESTERN');
-    const hasAuxiliary = db.products.some(p => p.warehouseId === 'AUXILIARY');
+    // Database Migration v4.0.0: Strict Isolation & Zeroing of Western & Auxiliary Warehouses
+    if ((db as any).version !== '4.0.0') {
+      console.log('🔄 Executing Migration to v4.0.0: Isolating Warehouses & Zeroing Western/Auxiliary...');
+      // 1. Ensure Eastern retains all its items intact (tagged strictly with warehouseId: 'EASTERN')
+      const easternProducts = db.products.filter(p => !p.warehouseId || p.warehouseId === 'EASTERN').map(p => ({
+        ...p,
+        warehouseId: 'EASTERN' as const,
+        warehouseName: 'المخزن الشرقي',
+      }));
 
-    if (!hasWestern || !hasAuxiliary) {
-      const easternProds = db.products.filter(p => (p.warehouseId || 'EASTERN') === 'EASTERN');
-      let currentMaxId = db.products.reduce((max, p) => Math.max(max, parseInt(p.id, 10) || 0), 0);
+      // 2. Western and Auxiliary start in a zeroed state (0 items) while fully enabled for independent additions
+      db.products = easternProducts;
 
-      if (!hasWestern && easternProds.length > 0) {
-        easternProds.forEach((base, idx) => {
-          currentMaxId++;
-          db.products.push({
-            ...base,
-            id: String(currentMaxId),
-            code: base.code.includes('-W') ? base.code : base.code.replace('NOSSER-', 'NOSSER-W'),
-            warehouseId: 'WESTERN',
-            warehouseName: 'المخزن الغربي',
-            stock: 12,
-            description: base.description?.replace('المخزن الشرقي', 'المخزن الغربي') || `صنف معتمد: ${base.name} (المخزن الغربي)`,
-            updatedAt: new Date().toISOString(),
-          });
-        });
-      }
+      // 3. Keep movements clean: movements for Eastern are preserved; remove any old cloned test movements for Western/Auxiliary
+      db.movements = (db.movements || []).filter(m => !m.warehouseId || m.warehouseId === 'EASTERN');
 
-      if (!hasAuxiliary && easternProds.length > 0) {
-        easternProds.forEach((base, idx) => {
-          currentMaxId++;
-          db.products.push({
-            ...base,
-            id: String(currentMaxId),
-            code: base.code.includes('-A') ? base.code : base.code.replace('NOSSER-', 'NOSSER-A'),
-            warehouseId: 'AUXILIARY',
-            warehouseName: 'المخزن الإضافي',
-            stock: 8,
-            description: base.description?.replace('المخزن الشرقي', 'المخزن الإضافي') || `صنف معتمد: ${base.name} (المخزن الإضافي)`,
-            updatedAt: new Date().toISOString(),
-          });
-        });
-      }
+      // 4. Update DB version to 4.0.0
+      (db as any).version = '4.0.0';
+
+      // 5. Add audit log
+      db.logs.unshift({
+        id: `log_migration_v4_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        username: 'النظام',
+        role: 'GENERAL_MANAGER',
+        action: 'ترحيل النظام إلى الإصدار 4.0.0',
+        details: 'تم بنجاح عزل المخازن الثلاثة (الشرقي، الغربي، الإضافي) وتصفير المخازن الجديدة مع الاحتفاظ الكامل ببيانات المخزن الشرقي',
+        type: 'INFO',
+      });
+
       writeDB(db);
     }
 
@@ -1027,11 +1018,6 @@ function findProductInList(products: Product[], idOrCodeOrName: string, targetWa
   // 4. Exact trimmed match on product name
   const nameMatch = pool.find(p => p.name.trim().toLowerCase() === lowerKey);
   if (nameMatch) return nameMatch;
-
-  // Fallback to broader search if not found in specific warehouse pool
-  if (targetWarehouseId) {
-    return findProductInList(products, idOrCodeOrName);
-  }
 
   return undefined;
 }

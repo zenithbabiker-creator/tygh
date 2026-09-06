@@ -25,7 +25,6 @@ import {
   DollarSign,
   FileSpreadsheet,
   Building2,
-  RefreshCw,
   Warehouse
 } from 'lucide-react';
 
@@ -34,7 +33,6 @@ interface InventoryViewProps {
   currentUser: User | null;
   movements?: StockMovement[];
   activeWarehouse?: WarehouseId;
-  onSwitchWarehouse?: () => void;
   onAddProduct: (product: Partial<Product>) => Promise<{ success: boolean; message?: string }>;
   onBatchAddProducts?: (items: Array<{ code?: string; name: string; stock: number; price?: number; category?: string; minStock?: number; unit?: string; description?: string; warehouseId?: WarehouseId; warehouseName?: string }>) => Promise<{ success: boolean; count?: number; message?: string }>;
   onUpdateProduct: (id: string, product: Partial<Product>) => Promise<{ success: boolean; message?: string }>;
@@ -59,7 +57,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   currentUser,
   movements = [],
   activeWarehouse,
-  onSwitchWarehouse,
   onAddProduct,
   onBatchAddProducts,
   onUpdateProduct,
@@ -397,11 +394,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return () => window.removeEventListener('keydown', handleInventoryPrintShortcut, true);
   }, [cartItems, recipientName, activeDeliveryItems, products, isInventoryReportOpen]);
 
-  // Automated Next Sequential Code Generator (NOSSER-101, NOSSER-102...)
+  // Automated Next Sequential Code Generator (NOSSER-E101, NOSSER-W101, NOSSER-A101...)
   const generateNextCode = (currentList: Product[] = products): string => {
+    const prefixLetter = activeWarehouse === 'WESTERN' ? 'W' : activeWarehouse === 'AUXILIARY' ? 'A' : 'E';
     let maxNum = 100;
     currentList.forEach(p => {
-      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(?:[EWA])?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
         const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > maxNum) {
@@ -409,7 +407,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }
       }
     });
-    return `NOSSER-${maxNum + 1}`;
+    return `NOSSER-${prefixLetter}${maxNum + 1}`;
   };
 
   // Open Single Add Product Modal
@@ -433,9 +431,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       alert('عفواً، خيارات إضافة وتعديل الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
       return;
     }
+    const prefixLetter = activeWarehouse === 'WESTERN' ? 'W' : activeWarehouse === 'AUXILIARY' ? 'A' : 'E';
     let startingNum = 100;
     products.forEach(p => {
-      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(?:[EWA])?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
         const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > startingNum) startingNum = num;
@@ -444,7 +443,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     const initialFive = Array.from({ length: 5 }, (_, i) => ({
       id: `init_${Date.now()}_${i}`,
-      code: `NOSSER-${startingNum + 1 + i}`,
+      code: `NOSSER-${prefixLetter}${startingNum + 1 + i}`,
       name: '',
       stock: '1',
     }));
@@ -979,20 +978,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
           </div>
 
-          {/* Action Buttons & Warehouse Switcher */}
+          {/* Action Buttons */}
           <div className="flex items-center gap-2.5 flex-wrap">
-            {onSwitchWarehouse && (
-              <button
-                type="button"
-                onClick={onSwitchWarehouse}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 rounded-xl font-bold text-xs transition flex items-center gap-2 shadow-md cursor-pointer hover:border-blue-400"
-                title="تغيير المخزن النشط (الشرقي / الغربي / الإضافي)"
-              >
-                <RefreshCw className="w-4 h-4 text-blue-400" />
-                <span>تبديل المخزن</span>
-              </button>
-            )}
-
             {isGeneralManager && (
               <button
                 type="button"
@@ -1193,7 +1180,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <tr>
                       <td colSpan={isGeneralManager ? 7 : 6} className="p-12 text-center text-slate-400">
                         <Boxes className="w-12 h-12 mx-auto mb-3 opacity-30 text-blue-600" />
-                        <p className="font-bold text-sm text-slate-700">لا توجد أصناف مخزنية تطابق البحث</p>
+                        {products.length === 0 ? (
+                          <div className="space-y-2">
+                            <p className="font-black text-sm text-slate-800">المخزن فارغ حالياً (0 أصناف)</p>
+                            <p className="text-xs text-slate-500 max-w-md mx-auto">
+                              تم تصفير المخزن وعزله بنجاح، وهو مفعّل وجاهز لإضافة وتوريد الأصناف المستقلة بالكامل.
+                            </p>
+                            {isGeneralManager && (
+                              <button
+                                type="button"
+                                onClick={openAddModal}
+                                className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs inline-flex items-center gap-2 shadow-md cursor-pointer"
+                              >
+                                <Package className="w-4 h-4" />
+                                <span>إضافة أول صنف في هذا المخزن</span>
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="font-bold text-sm text-slate-700">لا توجد أصناف مخزنية تطابق البحث</p>
+                        )}
                       </td>
                     </tr>
                   ) : (
