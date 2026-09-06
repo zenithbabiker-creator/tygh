@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Product, User, StockMovement } from '../types';
+import { Product, User, StockMovement, WarehouseId, WAREHOUSES } from '../types';
 import { SmartSearchBar } from './SmartSearchBar';
 import { searchAndRank, toArabicNumerals } from '../lib/arabicUtils';
 import { DeliveryOrderModal, DispatchItem } from './DeliveryOrderModal';
+import { InventoryReportModal } from './InventoryReportModal';
 import {
   Package,
   Plus,
@@ -22,15 +23,20 @@ import {
   Building,
   User as UserIcon,
   DollarSign,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Building2,
+  RefreshCw,
+  Warehouse
 } from 'lucide-react';
 
 interface InventoryViewProps {
   products: Product[];
   currentUser: User | null;
   movements?: StockMovement[];
+  activeWarehouse?: WarehouseId;
+  onSwitchWarehouse?: () => void;
   onAddProduct: (product: Partial<Product>) => Promise<{ success: boolean; message?: string }>;
-  onBatchAddProducts?: (items: Array<{ code?: string; name: string; stock: number; price?: number; category?: string; minStock?: number; unit?: string; description?: string }>) => Promise<{ success: boolean; count?: number; message?: string }>;
+  onBatchAddProducts?: (items: Array<{ code?: string; name: string; stock: number; price?: number; category?: string; minStock?: number; unit?: string; description?: string; warehouseId?: WarehouseId; warehouseName?: string }>) => Promise<{ success: boolean; count?: number; message?: string }>;
   onUpdateProduct: (id: string, product: Partial<Product>) => Promise<{ success: boolean; message?: string }>;
   onDeleteProduct: (id: string) => Promise<{ success: boolean; message?: string }>;
   onStockMovement: (movement: {
@@ -52,6 +58,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   products,
   currentUser,
   movements = [],
+  activeWarehouse,
+  onSwitchWarehouse,
   onAddProduct,
   onBatchAddProducts,
   onUpdateProduct,
@@ -86,31 +94,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
-
-  // Keyboard shortcut Ctrl + P handler to trigger delivery order print with mandatory field validation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-        // If the delivery order modal is already open, let the modal handle it
-        if (activeDeliveryItems && activeDeliveryItems.length > 0) {
-          return;
-        }
-
-        e.preventDefault();
-        if (cartItems.length === 0) {
-          alert('💡 تنبيه: سلة أمر تسليم المخزن فارغة حالياً.\n\nخطوات الطباعة:\n1. انقر على الصنف لإضافته إلى أمر التسليم.\n2. اكتب "اسم المستلم / الجهة المستلمة".\n3. اضغط على زر "إصدار وطباعة أمر تسليم مخزن" أو اختصار (Ctrl + P).');
-          return;
-        }
-        if (!recipientName.trim()) {
-          alert('⚠️ تنبيه هام: يرجى كتابة "اسم المستلم / الجهة المستلمة" في الحقل المخصص بالسلة قبل طباعة أمر التسليم.');
-          return;
-        }
-        handleCompleteInvoice();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cartItems, recipientName, activeDeliveryItems]);
+  const [isInventoryReportOpen, setIsInventoryReportOpen] = useState(false);
 
   // Key Inventory Metrics
   const metrics = useMemo(() => {
@@ -387,8 +371,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
         // If delivery order preview modal is already open, let DeliveryOrderModal handle it
         if (activeDeliveryItems && activeDeliveryItems.length > 0) {
-          window.focus();
-          window.print();
+          return;
+        }
+
+        // If inventory report modal is already open, it handles it
+        if (isInventoryReportOpen) {
           return;
         }
 
@@ -401,19 +388,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           return;
         }
 
-        // Otherwise, invoke internal printing for the current inventory view directly
-        try {
-          window.focus();
-          window.print();
-        } catch (err) {
-          console.error('Internal inventory print error:', err);
-        }
+        // Otherwise, open the official inventory stock report for verified, crystal-clear printing
+        setIsInventoryReportOpen(true);
       }
     };
 
     window.addEventListener('keydown', handleInventoryPrintShortcut, true);
     return () => window.removeEventListener('keydown', handleInventoryPrintShortcut, true);
-  }, [cartItems, recipientName, activeDeliveryItems, products]);
+  }, [cartItems, recipientName, activeDeliveryItems, products, isInventoryReportOpen]);
 
   // Automated Next Sequential Code Generator (NOSSER-101, NOSSER-102...)
   const generateNextCode = (currentList: Product[] = products): string => {
@@ -627,6 +609,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           category: 'عام',
           minStock: 5,
           unit: 'وحدة',
+          warehouseId: activeWarehouse,
+          warehouseName: activeWarehouse ? WAREHOUSES[activeWarehouse]?.name : undefined,
         };
       });
 
@@ -713,6 +697,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           stock: Math.max(0, parseInt(stock, 10) || 0),
           minStock: Math.max(1, parseInt(minStock, 10) || 5),
           unit: 'وحدة',
+          warehouseId: activeWarehouse,
+          warehouseName: activeWarehouse ? WAREHOUSES[activeWarehouse]?.name : undefined,
           description: '',
         });
         if (res.success) {
@@ -936,43 +922,109 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     );
   }
 
+  const whConfig = activeWarehouse ? WAREHOUSES[activeWarehouse] : null;
+
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
       
-      {/* Top Banner & Quick Metrics */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm no-print">
-        <div className="space-y-1">
-          <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight font-['Tajawal']">
-            إدارة المخزن وأوامر تسليم المخزن
-          </h2>
-          <p className="text-xs text-slate-500 font-semibold">
-            نظام متكامل لإدارة الأصناف والمخزون، وإصدار وطباعة أوامر تسليم المخزن الفورية
-          </p>
-        </div>
+      {/* Top Warehouse Dedicated Dashboard Banner */}
+      <div className={`p-6 rounded-2xl border shadow-sm no-print transition-all ${
+        whConfig
+          ? activeWarehouse === 'EASTERN'
+            ? 'bg-gradient-to-r from-blue-950 via-slate-900 to-slate-900 border-blue-800 text-white'
+            : activeWarehouse === 'WESTERN'
+            ? 'bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border-emerald-800 text-white'
+            : 'bg-gradient-to-r from-amber-950 via-slate-900 to-slate-900 border-amber-800 text-white'
+          : 'bg-white border-slate-200 text-slate-900'
+      }`}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-lg ${
+              whConfig
+                ? activeWarehouse === 'EASTERN'
+                  ? 'bg-blue-600 text-white shadow-blue-900/50'
+                  : activeWarehouse === 'WESTERN'
+                  ? 'bg-emerald-600 text-white shadow-emerald-900/50'
+                  : 'bg-amber-600 text-white shadow-amber-900/50'
+                : 'bg-blue-600 text-white'
+            }`}>
+              <Building2 className="w-8 h-8" />
+            </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-3 flex-wrap">
-          {isGeneralManager && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-xl md:text-2xl font-black tracking-tight font-['Tajawal']">
+                  {whConfig ? `لوحة تحكم ${whConfig.name}` : 'إدارة المخزن وأوامر تسليم المخزن'}
+                </h2>
+                {whConfig && (
+                  <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
+                    activeWarehouse === 'EASTERN'
+                      ? 'bg-blue-500/20 text-blue-300 border-blue-400/40'
+                      : activeWarehouse === 'WESTERN'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-400/40'
+                  }`}>
+                    كود: {whConfig.shortCode}
+                  </span>
+                )}
+                <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-md font-bold">
+                  عزل تام للأرصدة والحركات
+                </span>
+              </div>
+              <p className={`text-xs font-semibold ${whConfig ? 'text-slate-300' : 'text-slate-500'}`}>
+                {whConfig
+                  ? `${whConfig.tagline} — ${whConfig.description}`
+                  : 'نظام متكامل لإدارة الأصناف والمخزون، وإصدار وطباعة أوامر تسليم المخزن الفورية'}
+              </p>
+            </div>
+          </div>
+
+          {/* Action Buttons & Warehouse Switcher */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {onSwitchWarehouse && (
+              <button
+                type="button"
+                onClick={onSwitchWarehouse}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 rounded-xl font-bold text-xs transition flex items-center gap-2 shadow-md cursor-pointer hover:border-blue-400"
+                title="تغيير المخزن النشط (الشرقي / الغربي / الإضافي)"
+              >
+                <RefreshCw className="w-4 h-4 text-blue-400" />
+                <span>تبديل المخزن</span>
+              </button>
+            )}
+
+            {isGeneralManager && (
+              <button
+                type="button"
+                onClick={openAddModal}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-xs transition flex items-center gap-2 shadow-md shadow-blue-900/30 cursor-pointer"
+              >
+                <Package className="w-4 h-4" />
+                <span>إضافة أصناف وتوريدات جديدة</span>
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={openAddModal}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-xs transition flex items-center gap-2 shadow-md shadow-blue-200 cursor-pointer"
+              onClick={() => setIsInventoryReportOpen(true)}
+              className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-extrabold text-xs transition flex items-center gap-2 shadow-md shadow-emerald-900/30 cursor-pointer border border-emerald-600"
+              title="معاينة وطباعة كشف جرد المخزون الحالي (Ctrl + P)"
             >
-              <Package className="w-4 h-4" />
-              <span>إضافة أصناف وتوريدات جديدة</span>
+              <Printer className="w-4 h-4" />
+              <span>طباعة كشف الجرد (Ctrl + P)</span>
             </button>
-          )}
 
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <ArrowRight className="w-4 h-4" />
-              <span>رجوع</span>
-            </button>
-          )}
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-xs transition flex items-center gap-1.5 cursor-pointer border border-slate-700"
+              >
+                <ArrowRight className="w-4 h-4" />
+                <span>رجوع</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -983,7 +1035,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <Boxes className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold">إجمالي الأصناف المسجلة</p>
+            <p className="text-xs text-slate-500 font-bold">
+              {whConfig ? `أصناف ${whConfig.name}` : 'إجمالي الأصناف المسجلة'}
+            </p>
             <p className="text-lg font-black text-slate-900 font-mono">{toArabicNumerals(metrics.totalItems)} صنف</p>
           </div>
         </div>
@@ -993,7 +1047,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <Package className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold">إجمالي القطع المتوفرة بالمخزن</p>
+            <p className="text-xs text-slate-500 font-bold">
+              {whConfig ? `رصيد وحدات ${whConfig.name}` : 'إجمالي القطع المتوفرة بالمخزن'}
+            </p>
             <p className="text-lg font-black text-emerald-700 font-mono">{toArabicNumerals(metrics.totalUnits)} وحدة</p>
           </div>
         </div>
@@ -1594,11 +1650,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         items={activeDeliveryItems || undefined}
         orderNumber={activeDeliveryOrderNo}
         recipientName={activeRecipientName}
+        warehouseName={activeWarehouse ? WAREHOUSES[activeWarehouse]?.name : undefined}
         onClose={() => {
           setActiveDeliveryItems(null);
           setActiveDeliveryOrderNo('');
           setActiveRecipientName('');
         }}
+      />
+
+      {/* OFFICIAL INVENTORY COUNT & STOCK AUDIT REPORT MODAL */}
+      <InventoryReportModal
+        isOpen={isInventoryReportOpen}
+        onClose={() => setIsInventoryReportOpen(false)}
+        products={products}
+        warehouseName={whConfig ? whConfig.name : (activeWarehouse ? WAREHOUSES[activeWarehouse]?.name : 'المخزن العام')}
+        operatorName={currentUser?.name || 'أمين المخزن المعتمد'}
       />
 
     </div>

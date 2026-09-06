@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { AuditLog, StockMovement } from '../types';
 import { toArabicNumerals } from '../lib/arabicUtils';
-import { DeliveryOrderModal } from './DeliveryOrderModal';
+import { DeliveryOrderModal, DispatchItem } from './DeliveryOrderModal';
 import {
   FileText,
   Boxes,
@@ -34,6 +34,33 @@ export const LogsView: React.FC<LogsViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
   const [selectedDeliveryOrder, setSelectedDeliveryOrder] = useState<StockMovement | null>(null);
+  const [selectedBatchItems, setSelectedBatchItems] = useState<DispatchItem[]>([]);
+
+  // Open delivery order preview with batch items resolution
+  const handleOpenDeliveryOrder = (mvt: StockMovement) => {
+    // If movement has referenceNo, find all movements belonging to the same order batch
+    const relatedMovements = mvt.referenceNo
+      ? movements.filter(m => m.referenceNo === mvt.referenceNo && m.type === 'OUT')
+      : [mvt];
+
+    const batchItems: DispatchItem[] = relatedMovements.map(m => ({
+      product: {
+        id: m.productId,
+        code: m.productCode,
+        name: m.productName,
+        category: 'عام',
+        stock: m.newStock,
+        unit: 'وحدة',
+        minStock: 5,
+        updatedAt: m.timestamp,
+        warehouseName: m.warehouseName,
+      },
+      quantity: m.quantity,
+    }));
+
+    setSelectedBatchItems(batchItems);
+    setSelectedDeliveryOrder(mvt);
+  };
 
   // Metrics for movements
   const totalInCount = useMemo(() => {
@@ -304,7 +331,7 @@ export const LogsView: React.FC<LogsViewProps> = ({
                         {/* Delivery Order Print Action */}
                         <td className="p-3.5 text-center">
                           <button
-                            onClick={() => setSelectedDeliveryOrder(mvt)}
+                            onClick={() => handleOpenDeliveryOrder(mvt)}
                             className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-200 rounded-lg text-xs font-bold transition flex items-center gap-1 mx-auto cursor-pointer shadow-xs"
                             title="معاينة وطباعة أمر تسليم المخزن (إذن الصرف)"
                           >
@@ -392,7 +419,13 @@ export const LogsView: React.FC<LogsViewProps> = ({
       {/* DELIVERY ORDER PRINT MODAL */}
       <DeliveryOrderModal
         movement={selectedDeliveryOrder}
-        onClose={() => setSelectedDeliveryOrder(null)}
+        items={selectedBatchItems}
+        orderNumber={selectedDeliveryOrder?.referenceNo}
+        warehouseName={selectedDeliveryOrder?.warehouseName}
+        onClose={() => {
+          setSelectedDeliveryOrder(null);
+          setSelectedBatchItems([]);
+        }}
       />
 
     </div>
