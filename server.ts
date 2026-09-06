@@ -261,7 +261,7 @@ function buildInitialProducts(): Product[] {
 const DEFAULT_PRODUCTS = buildInitialProducts();
 
 const DEFAULT_DB: DBData = {
-  version: '4.0.0',
+  version: '4.0.1',
   users: [
     {
       id: 'usr_1',
@@ -288,6 +288,8 @@ const DEFAULT_DB: DBData = {
     productId: p.id,
     productCode: p.code,
     productName: p.name,
+    warehouseId: 'EASTERN' as const,
+    warehouseName: 'المخزن الشرقي',
     type: 'IN',
     quantity: p.stock,
     previousStock: 0,
@@ -357,6 +359,8 @@ function readDB(): DBData {
         productId: p.id,
         productCode: p.code,
         productName: p.name,
+        warehouseId: 'EASTERN' as const,
+        warehouseName: 'المخزن الشرقي',
         type: 'IN',
         quantity: p.stock,
         previousStock: 0,
@@ -393,35 +397,59 @@ function readDB(): DBData {
         p.warehouseName = 'المخزن الشرقي';
         migratedWarehouseCount++;
       }
+      (p as any).warehouse_id = p.warehouseId;
+      (p as any).store_id = p.warehouseId;
     });
 
-    // Database Migration v4.0.0: Strict Isolation & Zeroing of Western & Auxiliary Warehouses
-    if ((db as any).version !== '4.0.0') {
-      console.log('🔄 Executing Migration to v4.0.0: Isolating Warehouses & Zeroing Western/Auxiliary...');
+    // Database Migration v4.0.1: Strict Isolation & Zeroing of Western & Auxiliary Warehouses
+    if ((db as any).version !== '4.0.1') {
+      console.log('🔄 Executing Migration to v4.0.1: Isolating Warehouses & Zeroing Western/Auxiliary...');
       // 1. Ensure Eastern retains all its items intact (tagged strictly with warehouseId: 'EASTERN')
-      const easternProducts = db.products.filter(p => !p.warehouseId || p.warehouseId === 'EASTERN').map(p => ({
-        ...p,
-        warehouseId: 'EASTERN' as const,
-        warehouseName: 'المخزن الشرقي',
-      }));
+      const easternProducts = db.products
+        .filter(p => !p.warehouseId || p.warehouseId === 'EASTERN')
+        .map(p => ({
+          ...p,
+          warehouseId: 'EASTERN' as const,
+          warehouse_id: 'EASTERN' as const,
+          store_id: 'EASTERN',
+          warehouseName: 'المخزن الشرقي',
+        }));
 
-      // 2. Western and Auxiliary start in a zeroed state (0 items) while fully enabled for independent additions
-      db.products = easternProducts;
+      // 2. Preserve any genuinely added products for Western and Auxiliary (identified by explicit tag or prefix)
+      const westernProducts = db.products
+        .filter(p => p.warehouseId === 'WESTERN' && p.code && (p.code.includes('-W') || (p as any).isUserAdded))
+        .map(p => ({ ...p, warehouseId: 'WESTERN' as const, warehouse_id: 'WESTERN' as const, store_id: 'WESTERN', warehouseName: 'المخزن الغربي' }));
 
-      // 3. Keep movements clean: movements for Eastern are preserved; remove any old cloned test movements for Western/Auxiliary
-      db.movements = (db.movements || []).filter(m => !m.warehouseId || m.warehouseId === 'EASTERN');
+      const auxProducts = db.products
+        .filter(p => p.warehouseId === 'AUXILIARY' && p.code && (p.code.includes('-A') || (p as any).isUserAdded))
+        .map(p => ({ ...p, warehouseId: 'AUXILIARY' as const, warehouse_id: 'AUXILIARY' as const, store_id: 'AUXILIARY', warehouseName: 'المخزن الإضافي' }));
 
-      // 4. Update DB version to 4.0.0
-      (db as any).version = '4.0.0';
+      // Combine: Eastern retains everything, Western and Auxiliary are zeroed unless uniquely added
+      db.products = [...easternProducts, ...westernProducts, ...auxProducts];
+
+      // 3. Keep movements clean: movements tagged with their respective warehouses
+      db.movements = (db.movements || []).map(m => {
+        const wh = m.warehouseId || 'EASTERN';
+        return {
+          ...m,
+          warehouseId: wh,
+          warehouse_id: wh,
+          store_id: wh,
+          warehouseName: m.warehouseName || (wh === 'WESTERN' ? 'المخزن الغربي' : wh === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي'),
+        };
+      });
+
+      // 4. Update DB version to 4.0.1
+      (db as any).version = '4.0.1';
 
       // 5. Add audit log
       db.logs.unshift({
-        id: `log_migration_v4_${Date.now()}`,
+        id: `log_migration_v401_${Date.now()}`,
         timestamp: new Date().toISOString(),
         username: 'النظام',
         role: 'GENERAL_MANAGER',
-        action: 'ترحيل النظام إلى الإصدار 4.0.0',
-        details: 'تم بنجاح عزل المخازن الثلاثة (الشرقي، الغربي، الإضافي) وتصفير المخازن الجديدة مع الاحتفاظ الكامل ببيانات المخزن الشرقي',
+        action: 'ترحيل النظام إلى الإصدار 4.0.1',
+        details: 'تم بنجاح تثبيت العزل البرمجي الصارم بين المخازن الثلاثة (المخزن الشرقي - المخزن الغربي - المخزن الإضافي) وتصفير المخازن الجديدة مع الاحتفاظ الكامل ببيانات المخزن الشرقي',
         type: 'INFO',
       });
 
@@ -698,27 +726,33 @@ app.post('/api/auth/reset-password-offline', (req, res) => {
   res.json({ success: true, message: 'تم التحقق من كلمة المرور القديمة وتحديث كلمة السر بنجاح وإلغاء القديمة تماماً!' });
 });
 
-// PRODUCTS - List all (optionally filtered by warehouse)
+// PRODUCTS - List all (strictly filtered by warehouse)
 app.get('/api/products', (req, res) => {
   const db = readDB();
-  const warehouse = req.query.warehouse as string | undefined;
+  const warehouse = (req.query.warehouse || req.query.warehouse_id || req.query.store_id) as string | undefined;
   let list = db.products || [];
   if (warehouse && ['EASTERN', 'WESTERN', 'AUXILIARY'].includes(warehouse)) {
-    list = list.filter(p => (p.warehouseId || 'EASTERN') === warehouse);
+    list = list.filter(p => (p.warehouseId || (p as any).warehouse_id || 'EASTERN') === warehouse);
   }
-  const sanitized = list.map((p, idx) => ({
-    ...p,
-    id: p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase()) ? String(p.id) : String(idx + 1),
-    code: p.code && p.code.startsWith('NOSSER-') ? p.code : `NOSSER-${p.code ? p.code.replace(/^NASSER-/, '') : p.id || idx + 101}`,
-    warehouseId: p.warehouseId || 'EASTERN',
-    warehouseName: p.warehouseName || (p.warehouseId === 'WESTERN' ? 'المخزن الغربي' : p.warehouseId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي'),
-  }));
-  res.json({ success: true, products: sanitized });
+  const sanitized = list.map((p, idx) => {
+    const whId = (p.warehouseId || (p as any).warehouse_id || warehouse || 'EASTERN') as 'EASTERN' | 'WESTERN' | 'AUXILIARY';
+    const whName = p.warehouseName || (whId === 'WESTERN' ? 'المخزن الغربي' : whId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي');
+    return {
+      ...p,
+      id: p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase()) ? String(p.id) : String(idx + 1),
+      code: p.code && p.code.startsWith('NOSSER-') ? p.code : `NOSSER-${p.code ? p.code.replace(/^NASSER-/, '') : p.id || idx + 101}`,
+      warehouseId: whId,
+      warehouse_id: whId,
+      store_id: whId,
+      warehouseName: whName,
+    };
+  });
+  res.json({ success: true, products: sanitized, count: sanitized.length, warehouse: warehouse || 'ALL' });
 });
 
 // PRODUCTS - Create Product
 app.post('/api/products', (req, res) => {
-  const { code, name, category, stock, price, minStock, unit, description, username, role, warehouseId, warehouseName } = req.body;
+  const { code, name, category, stock, price, minStock, unit, description, username, role, warehouseId, warehouse_id, store_id, warehouseName } = req.body;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، إضافة صنف جديد هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
@@ -726,7 +760,7 @@ app.post('/api/products', (req, res) => {
 
   const db = readDB();
   
-  const targetWarehouseId = (warehouseId as string) || 'EASTERN';
+  const targetWarehouseId = ((warehouseId || warehouse_id || store_id) as string) || 'EASTERN';
   const targetWarehouseName = warehouseName || (targetWarehouseId === 'WESTERN' ? 'المخزن الغربي' : targetWarehouseId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي');
 
   let productCode = (code || '').trim();
@@ -757,7 +791,9 @@ app.post('/api/products', (req, res) => {
     stock: initialStock,
     minStock: Number(minStock) || 5,
     unit: unit || 'وحدة',
-    warehouseId: targetWarehouseId,
+    warehouseId: targetWarehouseId as any,
+    warehouse_id: targetWarehouseId as any,
+    store_id: targetWarehouseId,
     warehouseName: targetWarehouseName,
     description: description || '',
     updatedAt: new Date().toISOString(),
@@ -772,7 +808,9 @@ app.post('/api/products', (req, res) => {
       productId: newProduct.id,
       productCode: newProduct.code,
       productName: newProduct.name,
-      warehouseId: targetWarehouseId,
+      warehouseId: targetWarehouseId as any,
+      warehouse_id: targetWarehouseId as any,
+      store_id: targetWarehouseId,
       warehouseName: targetWarehouseName,
       type: 'IN',
       quantity: initialStock,
@@ -800,7 +838,7 @@ app.post('/api/products', (req, res) => {
 
 // PRODUCTS - Batch Create Products
 app.post('/api/products/batch', (req, res) => {
-  const { items, username, role, warehouseId, warehouseName } = req.body;
+  const { items, username, role, warehouseId, warehouse_id, store_id, warehouseName } = req.body;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، إضافة الأصناف دفعة واحدة هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
@@ -811,7 +849,7 @@ app.post('/api/products/batch', (req, res) => {
   }
 
   const db = readDB();
-  const targetWarehouseId = (warehouseId as string) || 'EASTERN';
+  const targetWarehouseId = ((warehouseId || warehouse_id || store_id) as string) || 'EASTERN';
   const targetWarehouseName = warehouseName || (targetWarehouseId === 'WESTERN' ? 'المخزن الغربي' : targetWarehouseId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي');
   const prefixLetter = targetWarehouseId === 'WESTERN' ? 'W' : targetWarehouseId === 'AUXILIARY' ? 'A' : 'E';
 
@@ -849,7 +887,9 @@ app.post('/api/products/batch', (req, res) => {
       stock: initialStock,
       minStock: Number(item.minStock) || 5,
       unit: item.unit || 'وحدة',
-      warehouseId: targetWarehouseId,
+      warehouseId: targetWarehouseId as any,
+      warehouse_id: targetWarehouseId as any,
+      store_id: targetWarehouseId,
       warehouseName: targetWarehouseName,
       description: item.description || '',
       updatedAt: now,
@@ -864,7 +904,9 @@ app.post('/api/products/batch', (req, res) => {
         productId: newProd.id,
         productCode: newProd.code,
         productName: newProd.name,
-        warehouseId: targetWarehouseId,
+        warehouseId: targetWarehouseId as any,
+        warehouse_id: targetWarehouseId as any,
+        store_id: targetWarehouseId,
         warehouseName: targetWarehouseName,
         type: 'IN',
         quantity: initialStock,
@@ -891,10 +933,11 @@ app.post('/api/products/batch', (req, res) => {
   res.json({ success: true, count: createdProducts.length, products: createdProducts });
 });
 
-// PRODUCTS - Update Product
+// PRODUCTS - Update Product (Strictly Scoped to Warehouse)
 app.put('/api/products/:id', (req, res) => {
   const { id } = req.params;
-  const { code, name, category, stock, price, minStock, unit, description, username, role } = req.body;
+  const { code, name, category, stock, price, minStock, unit, description, username, role, warehouseId, warehouse_id, store_id } = req.body;
+  const targetWhId = (warehouseId || warehouse_id || store_id || req.query.warehouse || req.query.warehouse_id) as string | undefined;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، تعديل الأصناف هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
@@ -902,8 +945,8 @@ app.put('/api/products/:id', (req, res) => {
 
   const db = readDB();
   
-  // Use resilient finder to locate matching product by ID or Code
-  const targetProduct = findProductInList(db.products, id) || (code ? findProductInList(db.products, code) : undefined);
+  // Use resilient finder to locate matching product by ID or Code strictly scoped to warehouse
+  const targetProduct = findProductInList(db.products, id, targetWhId) || (code ? findProductInList(db.products, code, targetWhId) : undefined);
   if (!targetProduct) {
     return res.status(404).json({ success: false, message: `الصنف غير موجود بالمخزن (${id})` });
   }
@@ -930,11 +973,15 @@ app.put('/api/products/:id', (req, res) => {
       productId: oldProd.id,
       productCode: newCode,
       productName: name || oldProd.name,
+      warehouseId: oldProd.warehouseId,
+      warehouse_id: oldProd.warehouseId,
+      store_id: oldProd.warehouseId,
+      warehouseName: oldProd.warehouseName,
       type: 'ADJUSTMENT',
       quantity: Math.abs(diff),
       previousStock: oldProd.stock,
       newStock: newStock,
-      reason: `تعديل يدوي للرصيد (${diff > 0 ? '+' : ''}${diff})`,
+      reason: `تعديل يدوي للرصيد (${diff > 0 ? '+' : ''}${diff}) في ${oldProd.warehouseName || 'المخزن'}`,
       operatorName: username || 'المدير العام',
       timestamp: new Date().toISOString(),
     };
@@ -949,6 +996,10 @@ app.put('/api/products/:id', (req, res) => {
     stock: newStock,
     minStock: Number(minStock) || oldProd.minStock || 5,
     unit: unit || oldProd.unit || 'وحدة',
+    warehouseId: oldProd.warehouseId,
+    warehouse_id: oldProd.warehouseId,
+    store_id: oldProd.warehouseId,
+    warehouseName: oldProd.warehouseName,
     description: description !== undefined ? description : oldProd.description,
     updatedAt: new Date().toISOString(),
   };
@@ -959,24 +1010,25 @@ app.put('/api/products/:id', (req, res) => {
     username || 'المدير العام',
     role || 'GENERAL_MANAGER',
     'تعديل بيانات صنف',
-    `تم تحديث بيانات الصنف (${db.products[index].name})، الرصيد الحالي: ${db.products[index].stock} ${db.products[index].unit}`,
+    `تم تحديث بيانات الصنف (${db.products[index].name}) في ${db.products[index].warehouseName}، الرصيد الحالي: ${db.products[index].stock} ${db.products[index].unit}`,
     'INFO'
   );
 
   res.json({ success: true, product: db.products[index] });
 });
 
-// PRODUCTS - Delete Product
+// PRODUCTS - Delete Product (Strictly Scoped to Warehouse)
 app.delete('/api/products/:id', (req, res) => {
   const { id } = req.params;
-  const { username, role } = req.query;
+  const { username, role, warehouseId, warehouse_id, store_id } = req.query;
+  const targetWhId = (warehouseId || warehouse_id || store_id || req.query.warehouse) as string | undefined;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، حذف الأصناف هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
   }
 
   const db = readDB();
-  const targetProduct = findProductInList(db.products, id);
+  const targetProduct = findProductInList(db.products, id, targetWhId);
   if (!targetProduct) {
     return res.status(404).json({ success: false, message: `الصنف المراد حذفه غير موجود بالمخزن (${id})` });
   }
@@ -984,23 +1036,27 @@ app.delete('/api/products/:id', (req, res) => {
   const actualId = targetProduct.id;
   const targetCode = targetProduct.code;
   const targetName = targetProduct.name;
+  const productWh = targetProduct.warehouseId || 'EASTERN';
 
-  db.products = db.products.filter(p => p.id !== actualId && p.code !== targetCode);
-  db.movements = db.movements.filter(m => m.productId !== actualId && m.productCode !== targetCode);
+  // Strictly delete ONLY this specific product in this specific warehouse
+  db.products = db.products.filter(p => p.id !== actualId);
+  db.movements = db.movements.filter(m => !(m.productId === actualId && (m.warehouseId || 'EASTERN') === productWh));
   writeDB(db);
 
-  addAuditLog(String(username || 'المدير العام'), String(role || 'GENERAL_MANAGER'), 'حذف صنف من المخزن', `تم حذف الصنف (${targetName}) بكود [${targetCode}] نهائياً من قاعدة البيانات`, 'WARNING');
+  addAuditLog(String(username || 'المدير العام'), String(role || 'GENERAL_MANAGER'), 'حذف صنف من المخزن', `تم حذف الصنف (${targetName}) بكود [${targetCode}] نهائياً من قاعدة بيانات ${targetProduct.warehouseName || productWh}`, 'WARNING');
 
   res.json({ success: true, message: 'تم حذف الصنف من قاعدة البيانات بنجاح' });
 });
 
-// Helper for resilient product lookup (strictly isolates primary key ID, exact code, and name)
+// Helper for resilient product lookup (strictly isolates primary key ID, exact code, and name within warehouse)
 function findProductInList(products: Product[], idOrCodeOrName: string, targetWarehouseId?: string): Product | undefined {
   if (!idOrCodeOrName) return undefined;
   const cleanKey = String(idOrCodeOrName).trim();
   if (!cleanKey || ['none', 'null', 'undefined'].includes(cleanKey.toLowerCase())) return undefined;
 
-  const pool = targetWarehouseId ? products.filter(p => (p.warehouseId || 'EASTERN') === targetWarehouseId) : products;
+  const pool = targetWarehouseId 
+    ? products.filter(p => (p.warehouseId || (p as any).warehouse_id || 'EASTERN') === targetWarehouseId) 
+    : products;
 
   // 1. Exact match on unique product ID
   const idMatch = pool.find(p => String(p.id) === cleanKey);

@@ -93,18 +93,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [formError, setFormError] = useState('');
   const [isInventoryReportOpen, setIsInventoryReportOpen] = useState(false);
 
+  // Strictly filter products to the active warehouse to guarantee 100% database & UI isolation
+  const currentWarehouseId = activeWarehouse || 'EASTERN';
+  const warehouseProducts = useMemo(() => {
+    return products.filter(p => (p.warehouseId || p.warehouse_id || 'EASTERN') === currentWarehouseId);
+  }, [products, currentWarehouseId]);
+
+  // Reset selection and cart on warehouse change
+  useEffect(() => {
+    setSelectedProductId(null);
+    setSearchTerm('');
+    setCartItems([]);
+  }, [activeWarehouse]);
+
   // Key Inventory Metrics
   const metrics = useMemo(() => {
-    const totalItems = products.length;
-    const totalUnits = products.reduce((acc, p) => acc + p.stock, 0);
-    const lowStockCount = products.filter(p => p.stock <= (p.minStock || 5)).length;
+    const totalItems = warehouseProducts.length;
+    const totalUnits = warehouseProducts.reduce((acc, p) => acc + p.stock, 0);
+    const lowStockCount = warehouseProducts.filter(p => p.stock <= (p.minStock || 5)).length;
     return { totalItems, totalUnits, lowStockCount };
-  }, [products]);
+  }, [warehouseProducts]);
 
   // Filter products using Arabic Smart Search Engine
   const filteredProducts = useMemo(() => {
-    return searchAndRank(products, searchTerm, (p: Product) => [p.name, p.code]);
-  }, [products, searchTerm]);
+    return searchAndRank(warehouseProducts, searchTerm, (p: Product) => [p.name, p.code]);
+  }, [warehouseProducts, searchTerm]);
 
   // Cart Calculations (Pure Physical Quantities Dispatched)
   const cartTotals = useMemo(() => {
@@ -119,7 +132,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const handleToggleProductCart = (product: Product) => {
     if (!product || !product.id) return;
     const pId = String(product.id);
-    const liveProd = products.find(p => String(p.id) === pId) || product;
+    const liveProd = warehouseProducts.find(p => String(p.id) === pId) || products.find(p => String(p.id) === pId) || product;
     if (liveProd.stock <= 0) {
       alert(`عفواً، الصنف (${liveProd.name}) غير متوفر بالمخزن حالياً (الرصيد المتاح: 0).`);
       return;
@@ -149,7 +162,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       handleRemoveFromCart(targetId);
       return;
     }
-    const liveProd = products.find(p => String(p.id) === targetId);
+    const liveProd = warehouseProducts.find(p => String(p.id) === targetId) || products.find(p => String(p.id) === targetId);
     const maxStock = liveProd ? liveProd.stock : 0;
 
     if (newQty > maxStock) {
@@ -1180,7 +1193,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <tr>
                       <td colSpan={isGeneralManager ? 7 : 6} className="p-12 text-center text-slate-400">
                         <Boxes className="w-12 h-12 mx-auto mb-3 opacity-30 text-blue-600" />
-                        {products.length === 0 ? (
+                        {warehouseProducts.length === 0 ? (
                           <div className="space-y-2">
                             <p className="font-black text-sm text-slate-800">المخزن فارغ حالياً (0 أصناف)</p>
                             <p className="text-xs text-slate-500 max-w-md mx-auto">

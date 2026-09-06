@@ -89,6 +89,8 @@ export interface Product {
   minStock: number;
   unit: string;
   warehouseId?: WarehouseId;
+  warehouse_id?: WarehouseId; // للتوافق المباشر مع استعلامات SQL وقواعد البيانات
+  store_id?: string;
   warehouseName?: string;
   price?: number; // للتوافق العكسي فقط - تم إلغاء القيود السعرية والمالية
   description?: string;
@@ -102,6 +104,8 @@ export interface StockMovement {
   productCode: string;
   productName: string;
   warehouseId?: WarehouseId;
+  warehouse_id?: WarehouseId;
+  store_id?: string;
   warehouseName?: string;
   type: 'IN' | 'OUT' | 'ADJUSTMENT'; // توريد / صرف / تعديل جرد
   quantity: number;
