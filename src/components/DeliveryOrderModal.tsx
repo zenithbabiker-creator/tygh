@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { StockMovement, Product } from '../types';
 import { toArabicNumerals } from '../lib/arabicUtils';
-import { X, Printer, PackageCheck, Edit3, Check, FileCheck, Layers } from 'lucide-react';
+import { X, Printer, Receipt, Edit3, Check, FileCheck, Layers } from 'lucide-react';
 import { printHtmlElement } from '../utils/printDocument';
 
 export interface DispatchItem {
   product: Product;
   quantity: number;
+  unitPrice?: number;
+  totalPrice?: number;
   notes?: string;
 }
 
@@ -26,24 +28,23 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
   orderNumber,
   recipientName,
   recipientEntity,
-  warehouseName,
   onClose
 }) => {
   const isOpen = Boolean(movement || (items && items.length > 0));
   const printableRef = useRef<HTMLDivElement>(null);
 
-  const resolvedWarehouseName = warehouseName || movement?.warehouseName || (items.length > 0 && items[0].product.warehouseName) || '';
-
   // Initial recipient parsing
   const initialRawRecipient =
     recipientName ||
     recipientEntity ||
-    (movement?.reason?.startsWith('أمر تسليم مخزن - المستلم:')
+    (movement?.reason?.startsWith('فاتورة مبيعات - المستلم/العميل:')
+      ? movement.reason.replace('فاتورة مبيعات - المستلم/العميل:', '').trim()
+      : movement?.reason?.startsWith('فاتورة مبيعات - المستلم:')
+      ? movement.reason.replace('فاتورة مبيعات - المستلم:', '').trim()
+      : movement?.reason?.startsWith('أمر تسليم مخزن - المستلم:')
       ? movement.reason.replace('أمر تسليم مخزن - المستلم:', '').trim()
       : movement?.reason?.startsWith('إذن صرف مخزني - المستلم:')
       ? movement.reason.replace('إذن صرف مخزني - المستلم:', '').trim()
-      : movement?.reason?.startsWith('فاتورة مبيعات - المستلم/العميل:')
-      ? movement.reason.replace('فاتورة مبيعات - المستلم/العميل:', '').trim()
       : '') ||
     movement?.operatorName ||
     '';
@@ -51,11 +52,11 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
   const [currentRecipient, setCurrentRecipient] = useState<string>(
     initialRawRecipient && initialRawRecipient !== '..........................'
       ? initialRawRecipient.trim()
-      : 'استلام مباشر / جهة معتمدة'
+      : 'عميل نقدي / مبيعات مباشرة'
   );
 
   const [isEditingRecipient, setIsEditingRecipient] = useState<boolean>(false);
-  const [orderNotes, setOrderNotes] = useState<string>('مطابق للمواصفات الفنية وبحالة ممتازة');
+  const [orderNotes, setOrderNotes] = useState<string>('مبيعات نقدية معتمدة - استلام سليم ومطابق');
   const [copyType, setCopyType] = useState<string>('نسخة أصلية معتمدة');
 
   useEffect(() => {
@@ -64,11 +65,11 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
     }
   }, [initialRawRecipient]);
 
-  // Dual-Engine High-Fidelity Print Trigger
+  // Dual-Engine High-Fidelity Print Trigger (Direct to native printer only, zero disk file prompts)
   const handlePrint = () => {
     if (printableRef.current) {
       printHtmlElement(printableRef.current, {
-        title: `أمر تسليم مخزن رقم ${orderNumber || movement?.referenceNo || '1'} - شركة NOSSER`,
+        title: `فاتورة مبيعات رقم ${orderNumber || movement?.referenceNo || '1'} - شركة NOSSER`,
       });
     } else {
       window.focus();
@@ -111,14 +112,24 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
           category: 'عام',
           stock: movement.newStock,
           unit: 'وحدة',
+          price: movement.unitPrice || 0,
           minStock: 5,
           updatedAt: movement.timestamp,
         },
         quantity: movement.quantity,
+        unitPrice: movement.unitPrice || 0,
+        totalPrice: movement.totalPrice || ((movement.unitPrice || 0) * movement.quantity),
       }]
     : [];
 
   const totalQuantity = displayItems.reduce((acc, itm) => acc + (Number(itm.quantity) || 1), 0);
+
+  // Calculate grand total order price (shown only in the printed/final sales invoice as requested)
+  const grandTotalAmount = displayItems.reduce((acc, itm) => {
+    const unitPrice = Number(itm.unitPrice ?? itm.product?.price ?? 0);
+    const qty = Number(itm.quantity) || 1;
+    return acc + (unitPrice * qty);
+  }, 0);
 
   const docNo = orderNumber
     ? orderNumber
@@ -133,13 +144,13 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
         {/* Controls Bar (no-print) */}
         <div className="flex items-center justify-between pb-4 border-b-2 border-black no-print gap-3 flex-wrap">
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-              <PackageCheck className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-900 flex items-center justify-center font-bold">
+              <Receipt className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-black text-black">معاينة وطباعة أمر تسليم مخزن (إذن صرف)</h3>
+              <h3 className="text-base font-black text-black">معاينة وطباعة فاتورة مبيعات</h3>
               <p className="text-[11px] text-slate-600 font-bold">
-                إذن الصرف معتمد رسمياً ويطبع بدقة عالية على ورق A4
+                فاتورة مبيعات رسمية معتمدة تطبع بدقة عالية على ورق A4 مع احتساب الإجمالي
               </p>
             </div>
           </div>
@@ -155,20 +166,20 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
                 title="نوع النسخة المطبوعة"
               >
                 <option value="نسخة أصلية معتمدة">نسخة أصلية معتمدة</option>
-                <option value="نسخة أمين المخزن">نسخة أمين المخزن</option>
-                <option value="نسخة العميل / المستلم">نسخة المستلم</option>
-                <option value="نسخة الإدارة والمراجعة">نسخة الإدارة المالية</option>
+                <option value="نسخة العميل">نسخة العميل</option>
+                <option value="نسخة المحاسبة والمبيعات">نسخة المحاسبة والمبيعات</option>
+                <option value="نسخة الإدارة">نسخة الإدارة</option>
               </select>
             </div>
 
             <button
               type="button"
               onClick={handlePrint}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md transition cursor-pointer"
-              title="طباعة أمر تسليم المخزن (Ctrl + P)"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md transition cursor-pointer"
+              title="طباعة فاتورة مبيعات (Ctrl + P)"
             >
               <Printer className="w-4 h-4" />
-              <span>طباعة أمر التسليم (Ctrl + P)</span>
+              <span>طباعة فاتورة مبيعات (Ctrl + P)</span>
             </button>
 
             <button
@@ -182,17 +193,17 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
           </div>
         </div>
 
-        {/* Quick Edit Bar for Storekeeper before Print (no-print) */}
+        {/* Quick Edit Bar before Print (no-print) */}
         <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-700 no-print">
           <div className="flex items-center gap-2 flex-1 min-w-[280px]">
-            <span className="text-slate-900 font-extrabold shrink-0">اسم المستلم:</span>
+            <span className="text-slate-900 font-extrabold shrink-0">اسم العميل / المستلم:</span>
             {isEditingRecipient ? (
               <div className="flex items-center gap-1.5 flex-1">
                 <input
                   type="text"
                   value={currentRecipient}
                   onChange={(e) => setCurrentRecipient(e.target.value)}
-                  placeholder="اكتب اسم المستلم أو الفرع..."
+                  placeholder="اكتب اسم العميل أو الجهة المستلمة..."
                   className="flex-1 px-3 py-1 bg-white border-2 border-blue-600 rounded-lg text-xs font-bold text-black focus:outline-none"
                   autoFocus
                 />
@@ -214,7 +225,7 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
                   type="button"
                   onClick={() => setIsEditingRecipient(true)}
                   className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded cursor-pointer"
-                  title="تعديل اسم المستلم قبل الطباعة"
+                  title="تعديل اسم العميل قبل الطباعة"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
                 </button>
@@ -223,13 +234,13 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-slate-900 font-extrabold shrink-0">ملاحظة الصرف:</span>
+            <span className="text-slate-900 font-extrabold shrink-0">ملاحظات الفاتورة:</span>
             <input
               type="text"
               value={orderNotes}
               onChange={(e) => setOrderNotes(e.target.value)}
               className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs text-black font-bold focus:outline-none focus:border-blue-600 max-w-xs"
-              placeholder="ملاحظات التسليم..."
+              placeholder="ملاحظات المبيعات..."
             />
           </div>
         </div>
@@ -251,15 +262,13 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-black text-black font-['Tajawal']">إدارة المخازن والمستودعات</h2>
-                {resolvedWarehouseName && (
-                  <span className="text-xs font-black px-2 py-0.5 border border-black rounded-md bg-slate-100 font-['Tajawal']">
-                    [{resolvedWarehouseName}]
-                  </span>
-                )}
+                <h2 className="text-sm font-black text-black font-['Tajawal']">نظام المبيعات المباشر</h2>
+                <span className="text-xs font-black px-2 py-0.5 border border-black rounded-md bg-slate-100 font-['Tajawal']">
+                  [فاتورة مبيعات رسمية]
+                </span>
               </div>
               <p className="text-xs font-black text-black font-mono flex items-center gap-1">
-                <span>هاتف:</span>
+                <span>هاتف المبيعات:</span>
                 <span dir="ltr" style={{ direction: 'ltr', display: 'inline-block', unicodeBidi: 'embed' }} className="font-sans font-black text-black">
                   &#x202A;0913247564&#x202C;
                 </span>
@@ -267,72 +276,82 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
             </div>
             
             <div className="text-center bg-white text-black border-2 border-black px-7 py-2.5 rounded-xl shadow-xs">
-              <h2 className="text-2xl font-black tracking-wide font-['Tajawal'] text-black">أمر تسليم مخزن</h2>
+              <h2 className="text-2xl font-black tracking-wide font-['Tajawal'] text-black">فاتورة مبيعات</h2>
               <p className="text-xs font-mono text-black font-black mt-1">
-                رقم إذن الصرف: {toArabicNumerals(docNo)}
+                رقم الفاتورة: {toArabicNumerals(docNo)}
               </p>
             </div>
           </div>
 
-          {/* Recipient & Date Meta Banner */}
+          {/* Customer & Date Meta Banner */}
           <div className="bg-white p-3.5 rounded-xl border-2 border-black flex flex-wrap items-center justify-between gap-3 text-xs font-black text-black">
             <div className="flex items-center gap-2">
-              <span className="text-black font-black text-sm">اسم المستلم / الجهة المستلمة:</span>
+              <span className="text-black font-black text-sm">اسم العميل / المستلم:</span>
               <strong className="text-black font-black text-base border-b-2 border-black px-3 py-0.5 min-w-[220px] inline-block">
                 {currentRecipient || '..........................'}
               </strong>
             </div>
             <div className="flex items-center gap-5 text-xs font-black">
               <div>
-                <span className="text-black">تاريخ الصرف والتسليم: </span>
+                <span className="text-black">تاريخ الفاتورة: </span>
                 <strong className="text-black">{formattedDate}</strong>
               </div>
               <div>
-                <span className="text-black">عدد الأصناف: </span>
+                <span className="text-black">عدد البنود: </span>
                 <strong className="text-black font-mono text-sm">{toArabicNumerals(displayItems.length)} صنف</strong>
               </div>
             </div>
           </div>
 
-          {/* Items Table - Pure Physical Stock Dispatched Tracking */}
+          {/* Items Table - Includes Unit Price and the Total column (السعر × الكمية) exclusively in this Sales Invoice */}
           <div className="border-2 border-black rounded-xl overflow-hidden bg-white">
             <table className="w-full text-right text-xs border-collapse">
               <thead>
                 <tr className="bg-white text-black font-black border-b-2 border-black">
-                  <th className="p-3 border-l-2 border-b-2 border-black w-10 text-center text-black font-black">م</th>
-                  <th className="p-3 border-l-2 border-b-2 border-black w-36 text-black font-black">كود الصنف (Item Code)</th>
-                  <th className="p-3 border-l-2 border-b-2 border-black text-black font-black">اسم الصنف وبيانه (Item Description)</th>
-                  <th className="p-3 border-l-2 border-b-2 border-black text-center w-28 text-black font-black">الوحدة</th>
-                  <th className="p-3 border-l-2 border-b-2 border-black text-center w-36 text-black font-black bg-slate-50">الكمية المسلمة (المصروفة)</th>
-                  <th className="p-3 border-b-2 border-black text-center w-40 text-black font-black">ملاحظات وحالة الاستلام</th>
+                  <th className="p-2.5 border-l-2 border-b-2 border-black w-10 text-center text-black font-black">م</th>
+                  <th className="p-2.5 border-l-2 border-b-2 border-black w-32 text-black font-black">كود الصنف (Code)</th>
+                  <th className="p-2.5 border-l-2 border-b-2 border-black text-black font-black">اسم الصنف والبيان (Description)</th>
+                  <th className="p-2.5 border-l-2 border-b-2 border-black text-center w-20 text-black font-black">الوحدة</th>
+                  <th className="p-2.5 border-l-2 border-b-2 border-black text-center w-24 text-black font-black bg-slate-50">الكمية</th>
+                  <th className="p-2.5 border-l-2 border-b-2 border-black text-center w-28 text-black font-black">سعر الوحدة</th>
+                  <th className="p-2.5 border-l-2 border-b-2 border-black text-center w-32 text-black font-black bg-slate-100">الإجمالي (السعر × الكمية)</th>
+                  <th className="p-2.5 border-b-2 border-black text-center w-32 text-black font-black">ملاحظات</th>
                 </tr>
               </thead>
               <tbody className="divide-y-2 divide-black font-black text-black bg-white">
                 {displayItems.map((item, index) => {
                   const qty = Number(item.quantity) || 1;
+                  const unitPrice = Number(item.unitPrice ?? item.product?.price ?? 0);
+                  const lineTotal = unitPrice * qty;
 
                   return (
                     <tr key={item.product.id || index} className="border-b-2 border-black bg-white">
-                      <td className="p-3 text-center font-mono border-l-2 border-black text-black font-black text-sm">
+                      <td className="p-2.5 text-center font-mono border-l-2 border-black text-black font-black text-sm">
                         {index + 1}
                       </td>
-                      <td className="p-3 font-mono font-black text-black border-l-2 border-black text-xs sm:text-sm">
+                      <td className="p-2.5 font-mono font-black text-black border-l-2 border-black text-xs sm:text-sm">
                         {toArabicNumerals(item.product.code)}
                       </td>
-                      <td className="p-3 font-black text-xs sm:text-sm text-black border-l-2 border-black">
+                      <td className="p-2.5 font-black text-xs sm:text-sm text-black border-l-2 border-black">
                         <div>{item.product.name}</div>
                         {item.product.category && (
                           <div className="text-[10px] text-slate-600 font-normal">{item.product.category}</div>
                         )}
                       </td>
-                      <td className="p-3 text-center font-black text-xs sm:text-sm text-black border-l-2 border-black">
+                      <td className="p-2.5 text-center font-black text-xs sm:text-sm text-black border-l-2 border-black">
                         {item.product.unit || 'وحدة'}
                       </td>
-                      <td className="p-3 text-center font-mono font-black text-sm sm:text-base text-black border-l-2 border-black bg-slate-50">
-                        {toArabicNumerals(qty)} {item.product.unit || 'وحدة'}
+                      <td className="p-2.5 text-center font-mono font-black text-sm sm:text-base text-black border-l-2 border-black bg-slate-50">
+                        {toArabicNumerals(qty)}
                       </td>
-                      <td className="p-3 text-center text-xs text-black border-black font-bold">
-                        {item.notes || orderNotes || 'مطابق للمواصفات السليمة'}
+                      <td className="p-2.5 text-center font-mono font-black text-xs sm:text-sm text-black border-l-2 border-black">
+                        {unitPrice > 0 ? `${toArabicNumerals(unitPrice.toLocaleString())} ج.س` : '—'}
+                      </td>
+                      <td className="p-2.5 text-center font-mono font-black text-xs sm:text-sm text-black border-l-2 border-black bg-slate-100">
+                        {lineTotal > 0 ? `${toArabicNumerals(lineTotal.toLocaleString())} ج.س` : '—'}
+                      </td>
+                      <td className="p-2.5 text-center text-xs text-black border-black font-bold">
+                        {item.notes || orderNotes || 'سليم ومطابق'}
                       </td>
                     </tr>
                   );
@@ -341,22 +360,30 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
             </table>
           </div>
 
-          {/* Grand Physical Inventory Quantity Summary Box */}
+          {/* Grand Physical Quantity & Financial Order Total Summary Box */}
           <div className="border-2 border-black rounded-xl p-4 bg-white flex flex-wrap items-center justify-between gap-4 text-black">
-            <div className="flex items-center gap-8 text-xs font-black">
+            <div className="flex items-center gap-6 text-xs font-black flex-wrap">
               <div>
-                <span className="text-black">إجمالي البنود المصروفة: </span>
+                <span className="text-black">إجمالي البنود: </span>
                 <strong className="font-mono text-sm text-black">{toArabicNumerals(displayItems.length)} صنف</strong>
               </div>
               <div>
-                <span className="text-black">إجمالي كمية القطع المسلمة: </span>
+                <span className="text-black">إجمالي كمية القطع: </span>
                 <strong className="font-mono text-base text-black underline underline-offset-4">{toArabicNumerals(totalQuantity)} قطعة</strong>
               </div>
+              {grandTotalAmount > 0 && (
+                <div className="bg-slate-100 border-2 border-black px-4 py-1.5 rounded-lg">
+                  <span className="text-black font-black text-sm">القيمة الكلية للطلب (إجمالي الفاتورة): </span>
+                  <strong className="font-mono text-base text-black font-black underline underline-offset-4">
+                    {toArabicNumerals(grandTotalAmount.toLocaleString())} ج.س
+                  </strong>
+                </div>
+              )}
             </div>
 
             <div className="text-xs font-black text-slate-800 bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-1.5">
               <FileCheck className="w-4 h-4 text-emerald-700" />
-              <span>✓ تم جرد وصرف الكميات أعلاه من المستودع بحالة سليمة</span>
+              <span>✓ فاتورة مبيعات معتمدة وصادرة رسمياً من شركة NOSSER</span>
             </div>
           </div>
 
@@ -365,7 +392,7 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
             
             {/* 1. Recipient Signature */}
             <div className="space-y-2 flex flex-col justify-between">
-              <span className="font-black text-black block text-sm">توقيع المستلم / الجهة المستلمة</span>
+              <span className="font-black text-black block text-sm">توقيع العميل / المستلم</span>
               <div className="text-[11px] font-black text-black space-y-1">
                 <div>الاسم: <span className="font-black text-black underline underline-offset-4">{currentRecipient || '..........................'}</span></div>
               </div>
@@ -374,11 +401,11 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
               </div>
             </div>
 
-            {/* 2. Storekeeper Signature */}
+            {/* 2. Salesperson Signature */}
             <div className="space-y-3 flex flex-col justify-between">
-              <span className="font-black text-black block text-sm">توقيع أمين المخزن المسلم</span>
+              <span className="font-black text-black block text-sm">توقيع مسؤول المبيعات</span>
               <div className="text-[11px] font-black text-black">
-                المسؤول: <span className="font-black text-black">{movement?.operatorName || 'أمين المخزن المعتمد'}</span>
+                المسؤول: <span className="font-black text-black">{movement?.operatorName || 'مسؤول المبيعات المعتمد'}</span>
               </div>
               <div className="border-b-2 border-dashed border-black w-4/5 mx-auto pb-1 text-black text-[11px] pt-3">
                 ..........................................
@@ -391,7 +418,7 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
               <div className="w-36 h-24 border-2 border-dashed border-black rounded-xl flex items-center justify-center text-[11px] text-black font-black bg-white text-center p-2 leading-snug">
                 الختم الرسمي لشركة NOSSER
                 <br />
-                إدارة المخازن - أم درمان
+                إدارة المبيعات - أم درمان
               </div>
             </div>
 
@@ -404,10 +431,10 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
           <button
             type="button"
             onClick={handlePrint}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-md transition cursor-pointer"
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-md transition cursor-pointer"
           >
             <Printer className="w-4 h-4" />
-            <span>طباعة أمر تسليم مخزن عبر محرك النظام (Ctrl + P)</span>
+            <span>طباعة فاتورة مبيعات عبر محرك النظام (Ctrl + P)</span>
           </button>
           <button
             type="button"

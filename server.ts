@@ -50,6 +50,8 @@ interface StockMovement {
   warehouseName?: string;
   type: 'IN' | 'OUT' | 'ADJUSTMENT'; // توريد / صرف / تعديل جرد
   quantity: number;
+  unitPrice?: number;
+  totalPrice?: number;
   previousStock: number;
   newStock: number;
   reason: string;
@@ -726,42 +728,30 @@ app.post('/api/auth/reset-password-offline', (req, res) => {
   res.json({ success: true, message: 'تم التحقق من كلمة المرور القديمة وتحديث كلمة السر بنجاح وإلغاء القديمة تماماً!' });
 });
 
-// PRODUCTS - List all (strictly filtered by warehouse)
+// PRODUCTS - List all (Direct Sales System)
 app.get('/api/products', (req, res) => {
   const db = readDB();
-  const warehouse = (req.query.warehouse || req.query.warehouse_id || req.query.store_id) as string | undefined;
-  let list = db.products || [];
-  if (warehouse && ['EASTERN', 'WESTERN', 'AUXILIARY'].includes(warehouse)) {
-    list = list.filter(p => (p.warehouseId || (p as any).warehouse_id || 'EASTERN') === warehouse);
-  }
+  const list = db.products || [];
   const sanitized = list.map((p, idx) => {
-    const whId = (p.warehouseId || (p as any).warehouse_id || warehouse || 'EASTERN') as 'EASTERN' | 'WESTERN' | 'AUXILIARY';
-    const whName = p.warehouseName || (whId === 'WESTERN' ? 'المخزن الغربي' : whId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي');
     return {
       ...p,
       id: p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase()) ? String(p.id) : String(idx + 1),
       code: p.code && p.code.startsWith('NOSSER-') ? p.code : `NOSSER-${p.code ? p.code.replace(/^NASSER-/, '') : p.id || idx + 101}`,
-      warehouseId: whId,
-      warehouse_id: whId,
-      store_id: whId,
-      warehouseName: whName,
+      price: Math.max(0, Number(p.price) || 0),
     };
   });
-  res.json({ success: true, products: sanitized, count: sanitized.length, warehouse: warehouse || 'ALL' });
+  res.json({ success: true, products: sanitized, count: sanitized.length });
 });
 
 // PRODUCTS - Create Product
 app.post('/api/products', (req, res) => {
-  const { code, name, category, stock, price, minStock, unit, description, username, role, warehouseId, warehouse_id, store_id, warehouseName } = req.body;
+  const { code, name, category, stock, price, minStock, unit, description, username, role } = req.body;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، إضافة صنف جديد هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
   }
 
   const db = readDB();
-  
-  const targetWarehouseId = ((warehouseId || warehouse_id || store_id) as string) || 'EASTERN';
-  const targetWarehouseName = warehouseName || (targetWarehouseId === 'WESTERN' ? 'المخزن الغربي' : targetWarehouseId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي');
 
   let productCode = (code || '').trim();
   if (!productCode) {
@@ -773,14 +763,13 @@ app.post('/api/products', (req, res) => {
         if (!isNaN(num) && num > maxNum) maxNum = num;
       }
     });
-    const prefixLetter = targetWarehouseId === 'WESTERN' ? 'W' : targetWarehouseId === 'AUXILIARY' ? 'A' : 'E';
-    productCode = `NOSSER-${prefixLetter}${maxNum + 1}`;
+    productCode = `NOSSER-${maxNum + 1}`;
   } else if (!productCode.startsWith('NOSSER-')) {
     productCode = productCode.startsWith('NASSER-') ? productCode.replace(/^NASSER-/, 'NOSSER-') : `NOSSER-${productCode}`;
   }
 
   const initialStock = Math.max(0, Number(stock) || 0);
-
+  const unitPrice = Math.max(0, Number(price) || 0);
   const nextId = String(db.products.reduce((max, p) => Math.max(max, parseInt(p.id, 10) || 0), 0) + 1);
 
   const newProduct: Product = {
@@ -791,10 +780,7 @@ app.post('/api/products', (req, res) => {
     stock: initialStock,
     minStock: Number(minStock) || 5,
     unit: unit || 'وحدة',
-    warehouseId: targetWarehouseId as any,
-    warehouse_id: targetWarehouseId as any,
-    store_id: targetWarehouseId,
-    warehouseName: targetWarehouseName,
+    price: unitPrice, // سعر الوحدة المحدد أثناء الإدخال
     description: description || '',
     updatedAt: new Date().toISOString(),
   };
@@ -808,15 +794,11 @@ app.post('/api/products', (req, res) => {
       productId: newProduct.id,
       productCode: newProduct.code,
       productName: newProduct.name,
-      warehouseId: targetWarehouseId as any,
-      warehouse_id: targetWarehouseId as any,
-      store_id: targetWarehouseId,
-      warehouseName: targetWarehouseName,
       type: 'IN',
       quantity: initialStock,
       previousStock: 0,
       newStock: initialStock,
-      reason: `رصيد افتتاحي في ${targetWarehouseName}`,
+      reason: 'رصيد افتتاحي في نظام المبيعات',
       operatorName: username || 'المدير العام',
       timestamp: new Date().toISOString(),
     };
@@ -828,8 +810,8 @@ app.post('/api/products', (req, res) => {
   addAuditLog(
     username || 'المدير العام',
     role || 'GENERAL_MANAGER',
-    'إضافة صنف جديد للمخزن',
-    `تم تسجيل الصنف (${newProduct.name}) بكود [${newProduct.code}] ورصيد افتتاحي ${initialStock} ${newProduct.unit} في ${targetWarehouseName}`,
+    'إضافة صنف جديد للمبيعات',
+    `تم تسجيل الصنف (${newProduct.name}) بكود [${newProduct.code}] ورصيد ${initialStock} ${newProduct.unit} وسعر ${unitPrice} ج.س`,
     'MOVEMENT'
   );
 
@@ -838,7 +820,7 @@ app.post('/api/products', (req, res) => {
 
 // PRODUCTS - Batch Create Products
 app.post('/api/products/batch', (req, res) => {
-  const { items, username, role, warehouseId, warehouse_id, store_id, warehouseName } = req.body;
+  const { items, username, role } = req.body;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، إضافة الأصناف دفعة واحدة هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
@@ -849,14 +831,11 @@ app.post('/api/products/batch', (req, res) => {
   }
 
   const db = readDB();
-  const targetWarehouseId = ((warehouseId || warehouse_id || store_id) as string) || 'EASTERN';
-  const targetWarehouseName = warehouseName || (targetWarehouseId === 'WESTERN' ? 'المخزن الغربي' : targetWarehouseId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي');
-  const prefixLetter = targetWarehouseId === 'WESTERN' ? 'W' : targetWarehouseId === 'AUXILIARY' ? 'A' : 'E';
 
   // Find baseline numeric serial code
   let maxNum = 100;
   db.products.forEach(p => {
-    const match = p.code.match(/^(?:NOSSER-|NASSER-)?(?:[EWA])?(\d+)$/i) || p.code.match(/\d+/);
+    const match = p.code.match(/^(?:NOSSER-|NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
     if (match) {
       const num = parseInt(match[1] || match[0], 10);
       if (!isNaN(num) && num > maxNum) maxNum = num;
@@ -873,11 +852,12 @@ app.post('/api/products/batch', (req, res) => {
 
     maxNum += 1;
     currentMaxId += 1;
-    let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NOSSER-${prefixLetter}${maxNum}`;
+    let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NOSSER-${maxNum}`;
     if (!finalCode.startsWith('NOSSER-')) {
       finalCode = finalCode.startsWith('NASSER-') ? finalCode.replace(/^NASSER-/, 'NOSSER-') : `NOSSER-${finalCode}`;
     }
     const initialStock = Math.max(0, Number(item.stock) || 0);
+    const itemPrice = Math.max(0, Number(item.price) || 0);
 
     const newProd: Product = {
       id: String(currentMaxId),
@@ -885,12 +865,9 @@ app.post('/api/products/batch', (req, res) => {
       name: item.name.trim(),
       category: item.category || 'عام',
       stock: initialStock,
+      price: itemPrice, // سعر الوحدة المحدد أثناء الإدخال
       minStock: Number(item.minStock) || 5,
       unit: item.unit || 'وحدة',
-      warehouseId: targetWarehouseId as any,
-      warehouse_id: targetWarehouseId as any,
-      store_id: targetWarehouseId,
-      warehouseName: targetWarehouseName,
       description: item.description || '',
       updatedAt: now,
     };
@@ -904,15 +881,11 @@ app.post('/api/products/batch', (req, res) => {
         productId: newProd.id,
         productCode: newProd.code,
         productName: newProd.name,
-        warehouseId: targetWarehouseId as any,
-        warehouse_id: targetWarehouseId as any,
-        store_id: targetWarehouseId,
-        warehouseName: targetWarehouseName,
         type: 'IN',
         quantity: initialStock,
         previousStock: 0,
         newStock: initialStock,
-        reason: `رصيد إدخال افتتاحي دفعة واحدة (${targetWarehouseName})`,
+        reason: 'رصيد إدخال مشتريات وتوريد دفعة واحدة',
         operatorName: username || 'المدير العام',
         timestamp: now,
       };
@@ -925,30 +898,27 @@ app.post('/api/products/batch', (req, res) => {
   addAuditLog(
     username || 'المدير العام',
     role || 'GENERAL_MANAGER',
-    'إضافة أصناف دفعة واحدة للمخزن (Excel Batch)',
-    `تم تسجيل عدد (${createdProducts.length}) صنف مخزني جديد في ${targetWarehouseName} بنجاح`,
+    'إدخال أصناف مشتريات دفعة واحدة (Excel Batch)',
+    `تم تسجيل عدد (${createdProducts.length}) صنف جديد بنجاح وتحديد أسعار الوحدات`,
     'MOVEMENT'
   );
 
   res.json({ success: true, count: createdProducts.length, products: createdProducts });
 });
 
-// PRODUCTS - Update Product (Strictly Scoped to Warehouse)
+// PRODUCTS - Update Product
 app.put('/api/products/:id', (req, res) => {
   const { id } = req.params;
-  const { code, name, category, stock, price, minStock, unit, description, username, role, warehouseId, warehouse_id, store_id } = req.body;
-  const targetWhId = (warehouseId || warehouse_id || store_id || req.query.warehouse || req.query.warehouse_id) as string | undefined;
+  const { code, name, category, stock, price, minStock, unit, description, username, role } = req.body;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، تعديل الأصناف هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
   }
 
   const db = readDB();
-  
-  // Use resilient finder to locate matching product by ID or Code strictly scoped to warehouse
-  const targetProduct = findProductInList(db.products, id, targetWhId) || (code ? findProductInList(db.products, code, targetWhId) : undefined);
+  const targetProduct = findProductInList(db.products, id) || (code ? findProductInList(db.products, code) : undefined);
   if (!targetProduct) {
-    return res.status(404).json({ success: false, message: `الصنف غير موجود بالمخزن (${id})` });
+    return res.status(404).json({ success: false, message: `الصنف غير موجود (${id})` });
   }
 
   const index = db.products.findIndex(p => p.id === targetProduct.id);
@@ -973,20 +943,18 @@ app.put('/api/products/:id', (req, res) => {
       productId: oldProd.id,
       productCode: newCode,
       productName: name || oldProd.name,
-      warehouseId: oldProd.warehouseId,
-      warehouse_id: oldProd.warehouseId,
-      store_id: oldProd.warehouseId,
-      warehouseName: oldProd.warehouseName,
       type: 'ADJUSTMENT',
       quantity: Math.abs(diff),
       previousStock: oldProd.stock,
       newStock: newStock,
-      reason: `تعديل يدوي للرصيد (${diff > 0 ? '+' : ''}${diff}) في ${oldProd.warehouseName || 'المخزن'}`,
+      reason: `تعديل يدوي للرصيد (${diff > 0 ? '+' : ''}${diff})`,
       operatorName: username || 'المدير العام',
       timestamp: new Date().toISOString(),
     };
     db.movements.unshift(movement);
   }
+
+  const updatedPrice = price !== undefined ? Math.max(0, Number(price) || 0) : (oldProd.price || 0);
 
   db.products[index] = {
     ...oldProd,
@@ -994,12 +962,9 @@ app.put('/api/products/:id', (req, res) => {
     name: (name || oldProd.name).trim(),
     category: category || oldProd.category || 'عام',
     stock: newStock,
+    price: updatedPrice,
     minStock: Number(minStock) || oldProd.minStock || 5,
     unit: unit || oldProd.unit || 'وحدة',
-    warehouseId: oldProd.warehouseId,
-    warehouse_id: oldProd.warehouseId,
-    store_id: oldProd.warehouseId,
-    warehouseName: oldProd.warehouseName,
     description: description !== undefined ? description : oldProd.description,
     updatedAt: new Date().toISOString(),
   };
@@ -1010,40 +975,37 @@ app.put('/api/products/:id', (req, res) => {
     username || 'المدير العام',
     role || 'GENERAL_MANAGER',
     'تعديل بيانات صنف',
-    `تم تحديث بيانات الصنف (${db.products[index].name}) في ${db.products[index].warehouseName}، الرصيد الحالي: ${db.products[index].stock} ${db.products[index].unit}`,
+    `تم تحديث بيانات الصنف (${db.products[index].name})، الرصيد: ${db.products[index].stock} ${db.products[index].unit}، السعر: ${updatedPrice} ج.س`,
     'INFO'
   );
 
   res.json({ success: true, product: db.products[index] });
 });
 
-// PRODUCTS - Delete Product (Strictly Scoped to Warehouse)
+// PRODUCTS - Delete Product
 app.delete('/api/products/:id', (req, res) => {
   const { id } = req.params;
-  const { username, role, warehouseId, warehouse_id, store_id } = req.query;
-  const targetWhId = (warehouseId || warehouse_id || store_id || req.query.warehouse) as string | undefined;
+  const { username, role } = req.query;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، حذف الأصناف هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
   }
 
   const db = readDB();
-  const targetProduct = findProductInList(db.products, id, targetWhId);
+  const targetProduct = findProductInList(db.products, id);
   if (!targetProduct) {
-    return res.status(404).json({ success: false, message: `الصنف المراد حذفه غير موجود بالمخزن (${id})` });
+    return res.status(404).json({ success: false, message: `الصنف المراد حذفه غير موجود (${id})` });
   }
 
   const actualId = targetProduct.id;
   const targetCode = targetProduct.code;
   const targetName = targetProduct.name;
-  const productWh = targetProduct.warehouseId || 'EASTERN';
 
-  // Strictly delete ONLY this specific product in this specific warehouse
   db.products = db.products.filter(p => p.id !== actualId);
-  db.movements = db.movements.filter(m => !(m.productId === actualId && (m.warehouseId || 'EASTERN') === productWh));
+  db.movements = db.movements.filter(m => m.productId !== actualId);
   writeDB(db);
 
-  addAuditLog(String(username || 'المدير العام'), String(role || 'GENERAL_MANAGER'), 'حذف صنف من المخزن', `تم حذف الصنف (${targetName}) بكود [${targetCode}] نهائياً من قاعدة بيانات ${targetProduct.warehouseName || productWh}`, 'WARNING');
+  addAuditLog(String(username || 'المدير العام'), String(role || 'GENERAL_MANAGER'), 'حذف صنف من النظام', `تم حذف الصنف (${targetName}) بكود [${targetCode}] نهائياً من قاعدة البيانات`, 'WARNING');
 
   res.json({ success: true, message: 'تم حذف الصنف من قاعدة البيانات بنجاح' });
 });
@@ -1153,7 +1115,7 @@ app.post('/api/movements', (req, res) => {
     quantity: qty,
     previousStock,
     newStock,
-    reason: (reason || '').trim() || (type === 'IN' ? 'توريد إضافي' : 'أمر تسليم مخزن'),
+    reason: (reason || '').trim() || (type === 'IN' ? 'توريد إضافي' : 'فاتورة مبيعات'),
     referenceNo: refNo,
     operatorName: operatorName || 'مسؤول المخزن',
     timestamp: new Date().toISOString(),
@@ -1179,24 +1141,21 @@ app.post('/api/movements', (req, res) => {
   });
 });
 
-// STOCK MOVEMENTS - Process Batch Delivery Order / Movements Atomically
+// STOCK MOVEMENTS - Process Batch Sales Invoice / Movements Atomically
 app.post('/api/movements/batch', (req, res) => {
-  const { items, referenceNo, reason, operatorName, role, warehouseId, warehouseName } = req.body;
+  const { items, referenceNo, reason, operatorName, role } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ success: false, message: 'فشلت العملية، لا توجد أصناف في أمر التسليم' });
+    return res.status(400).json({ success: false, message: 'فشلت العملية، لا توجد أصناف في فاتورة المبيعات' });
   }
 
-  const targetWhId = (warehouseId as string) || 'EASTERN';
-  const targetWhName = warehouseName || (targetWhId === 'WESTERN' ? 'المخزن الغربي' : targetWhId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي');
-
   const db = readDB();
-  const opName = operatorName || 'أمين المخزن';
+  const opName = operatorName || 'مسؤول المبيعات';
   const now = new Date().toISOString();
   const refNo = (referenceNo || '').trim() || '1';
-  const reasonText = (reason || '').trim() || 'أمر تسليم مخزن';
+  const reasonText = (reason || '').trim() || 'فاتورة مبيعات';
 
-  // 1. Validation phase: check that all items exist in the active warehouse and have sufficient stock
+  // 1. Validation phase: check that all items exist and have sufficient stock
   for (const itm of items) {
     const pId = itm.productId ? String(itm.productId).trim() : '';
     const pCode = itm.productCode ? String(itm.productCode).trim() : '';
@@ -1204,25 +1163,25 @@ app.post('/api/movements/batch', (req, res) => {
     const fallbackKey = itm.code || itm.name || '';
     const qty = Math.max(1, Number(itm.quantity) || 1);
 
-    const prod = (pId ? findProductInList(db.products, pId, targetWhId) : undefined) ||
-                 (pCode ? findProductInList(db.products, pCode, targetWhId) : undefined) ||
-                 (pName ? findProductInList(db.products, pName, targetWhId) : undefined) ||
-                 (fallbackKey ? findProductInList(db.products, fallbackKey, targetWhId) : undefined);
+    const prod = (pId ? findProductInList(db.products, pId) : undefined) ||
+                 (pCode ? findProductInList(db.products, pCode) : undefined) ||
+                 (pName ? findProductInList(db.products, pName) : undefined) ||
+                 (fallbackKey ? findProductInList(db.products, fallbackKey) : undefined);
 
     if (!prod) {
       const label = pName || pCode || pId || fallbackKey || 'غير معروف';
-      return res.status(404).json({ success: false, message: `الصنف (${label}) غير موجود في ${targetWhName}` });
+      return res.status(404).json({ success: false, message: `الصنف (${label}) غير موجود بالنظام` });
     }
     const currentStock = Number(prod.stock) || 0;
     if (currentStock < qty) {
       return res.status(400).json({
         success: false,
-        message: `الرصيد المتاح من (${prod.name}) في [${targetWhName}] هو ${currentStock} فقط، ولا يكفي لصرف كمية ${qty}`,
+        message: `الرصيد المتاح من (${prod.name}) هو ${currentStock} فقط، ولا يكفي لصرف كمية ${qty}`,
       });
     }
   }
 
-  // 2. Execution phase: deduct stock strictly from this warehouse and record movements
+  // 2. Execution phase: deduct stock and record movements
   const createdMovements: StockMovement[] = [];
   for (const itm of items) {
     const pId = itm.productId ? String(itm.productId).trim() : '';
@@ -1231,13 +1190,15 @@ app.post('/api/movements/batch', (req, res) => {
     const fallbackKey = itm.code || itm.name || '';
     const qty = Math.max(1, Number(itm.quantity) || 1);
 
-    const prod = ((pId ? findProductInList(db.products, pId, targetWhId) : undefined) ||
-                  (pCode ? findProductInList(db.products, pCode, targetWhId) : undefined) ||
-                  (pName ? findProductInList(db.products, pName, targetWhId) : undefined) ||
-                  (fallbackKey ? findProductInList(db.products, fallbackKey, targetWhId) : undefined))!;
+    const prod = ((pId ? findProductInList(db.products, pId) : undefined) ||
+                  (pCode ? findProductInList(db.products, pCode) : undefined) ||
+                  (pName ? findProductInList(db.products, pName) : undefined) ||
+                  (fallbackKey ? findProductInList(db.products, fallbackKey) : undefined))!;
 
     const previousStock = Number(prod.stock) || 0;
     const newStock = Math.max(0, previousStock - qty);
+    const unitPrice = Number(itm.unitPrice ?? prod.price ?? 0);
+    const totalPrice = unitPrice * qty;
 
     prod.stock = newStock;
     prod.updatedAt = now;
@@ -1247,10 +1208,10 @@ app.post('/api/movements/batch', (req, res) => {
       productId: prod.id,
       productCode: prod.code,
       productName: prod.name,
-      warehouseId: targetWhId,
-      warehouseName: targetWhName,
       type: 'OUT',
       quantity: qty,
+      unitPrice,
+      totalPrice,
       previousStock,
       newStock,
       reason: reasonText,
@@ -1267,49 +1228,36 @@ app.post('/api/movements/batch', (req, res) => {
 
   addAuditLog(
     opName,
-    role || 'WAREHOUSE_MANAGER',
-    'صرف أمر تسليم مخزن (دفعة واحدة)',
-    `تم صرف عدد (${createdMovements.length}) أصناف من [${targetWhName}] بموجب أمر تسليم رقم [${refNo}] بنجاح`,
+    role || 'SALES_MANAGER',
+    'إصدار فاتورة مبيعات (دفعة واحدة)',
+    `تم صرف وتوثيق عدد (${createdMovements.length}) أصناف بموجب فاتورة مبيعات رقم [${refNo}] بنجاح`,
     'MOVEMENT'
   );
 
   res.json({
     success: true,
-    message: `تم صرف وتوثيق أمر التسليم رقم [${refNo}] من ${targetWhName} بنجاح`,
+    message: `تم صرف وتوثيق فاتورة المبيعات رقم [${refNo}] بنجاح`,
     movements: createdMovements,
   });
 });
 
-// STOCK MOVEMENTS - Get History (optionally filtered by warehouse)
+// STOCK MOVEMENTS - Get History
 app.get('/api/movements', (req, res) => {
   const db = readDB();
-  const warehouse = req.query.warehouse as string | undefined;
-  let list = db.movements || [];
-  if (warehouse && ['EASTERN', 'WESTERN', 'AUXILIARY'].includes(warehouse)) {
-    list = list.filter(m => (m.warehouseId || 'EASTERN') === warehouse);
-  }
-  res.json({ success: true, movements: list });
+  res.json({ success: true, movements: db.movements || [] });
 });
 
-// SALES INVOICES - List (optionally filtered by warehouse)
+// SALES INVOICES - List
 app.get('/api/sales', (req, res) => {
   const db = readDB();
-  const warehouse = req.query.warehouse as string | undefined;
-  let list = db.sales || [];
-  if (warehouse && ['EASTERN', 'WESTERN', 'AUXILIARY'].includes(warehouse)) {
-    list = list.filter(s => (s.warehouseId || 'EASTERN') === warehouse);
-  }
-  res.json({ success: true, sales: list });
+  res.json({ success: true, sales: db.sales || [] });
 });
 
 // SALES INVOICES - Create Sale Record
 app.post('/api/sales', (req, res) => {
-  const { customerName, customerPhone, cashierId, cashierName, subtotal, discount, tax, total, paymentMethod, items, notes, invoiceNumber, warehouseId, warehouseName } = req.body;
+  const { customerName, customerPhone, cashierId, cashierName, subtotal, discount, tax, total, paymentMethod, items, notes, invoiceNumber } = req.body;
   const db = readDB();
   if (!db.sales) db.sales = [];
-
-  const targetWhId = (warehouseId as string) || 'EASTERN';
-  const targetWhName = warehouseName || (targetWhId === 'WESTERN' ? 'المخزن الغربي' : targetWhId === 'AUXILIARY' ? 'المخزن الإضافي' : 'المخزن الشرقي');
 
   const count = db.sales.length + 1;
   const invNum = invoiceNumber || `INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(count).padStart(4, '0')}`;
@@ -1318,13 +1266,11 @@ app.post('/api/sales', (req, res) => {
     id: `sale_${Date.now()}`,
     invoiceNumber: invNum,
     deliveryOrderRef: invNum,
-    warehouseId: targetWhId,
-    warehouseName: targetWhName,
     createdAt: new Date().toISOString(),
     customerName: customerName || '',
     customerPhone: customerPhone || '',
     cashierId: cashierId || 'usr_1',
-    cashierName: cashierName || 'أمين المخزن',
+    cashierName: cashierName || 'مسؤول المبيعات',
     subtotal: Number(subtotal) || 0,
     discount: Number(discount) || 0,
     tax: Number(tax) || 0,
@@ -1339,9 +1285,9 @@ app.post('/api/sales', (req, res) => {
 
   addAuditLog(
     newSale.cashierName,
-    'WAREHOUSE_MANAGER',
-    'تسجيل أمر تسليم مخزن',
-    `تم تسجيل وتوثيق أمر تسليم مخزن رقم [${invNum}] من ${targetWhName} وخصم الأصناف بنجاح`,
+    'SALES_MANAGER',
+    'تسجيل فاتورة مبيعات',
+    `تم تسجيل وتوثيق فاتورة مبيعات رقم [${invNum}] وخصم الأصناف بنجاح`,
     'MOVEMENT'
   );
 

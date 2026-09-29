@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Product, User, StockMovement, WarehouseId, WAREHOUSES } from '../types';
+import { Product, User, StockMovement, WarehouseId } from '../types';
 import { SmartSearchBar } from './SmartSearchBar';
 import { searchAndRank, toArabicNumerals } from '../lib/arabicUtils';
 import { DeliveryOrderModal, DispatchItem } from './DeliveryOrderModal';
@@ -20,12 +20,9 @@ import {
   ShoppingCart,
   Minus,
   Check,
-  Building,
   User as UserIcon,
-  DollarSign,
   FileSpreadsheet,
-  Building2,
-  Warehouse
+  Receipt
 } from 'lucide-react';
 
 interface InventoryViewProps {
@@ -34,7 +31,7 @@ interface InventoryViewProps {
   movements?: StockMovement[];
   activeWarehouse?: WarehouseId;
   onAddProduct: (product: Partial<Product>) => Promise<{ success: boolean; message?: string }>;
-  onBatchAddProducts?: (items: Array<{ code?: string; name: string; stock: number; price?: number; category?: string; minStock?: number; unit?: string; description?: string; warehouseId?: WarehouseId; warehouseName?: string }>) => Promise<{ success: boolean; count?: number; message?: string }>;
+  onBatchAddProducts?: (items: Array<{ code?: string; name: string; stock: number; price?: number; category?: string; minStock?: number; unit?: string; description?: string }>) => Promise<{ success: boolean; count?: number; message?: string }>;
   onUpdateProduct: (id: string, product: Partial<Product>) => Promise<{ success: boolean; message?: string }>;
   onDeleteProduct: (id: string) => Promise<{ success: boolean; message?: string }>;
   onStockMovement: (movement: {
@@ -45,7 +42,7 @@ interface InventoryViewProps {
     referenceNo?: string;
   }) => Promise<{ success: boolean; message?: string }>;
   onBatchStockMovement?: (data: {
-    items: Array<{ productId: string; quantity: number }>;
+    items: Array<{ productId: string; quantity: number; unitPrice?: number; totalPrice?: number }>;
     reason: string;
     referenceNo: string;
   }) => Promise<{ success: boolean; message?: string; movements?: StockMovement[] }>;
@@ -55,8 +52,6 @@ interface InventoryViewProps {
 export const InventoryView: React.FC<InventoryViewProps> = ({
   products,
   currentUser,
-  movements = [],
-  activeWarehouse,
   onAddProduct,
   onBatchAddProducts,
   onUpdateProduct,
@@ -76,188 +71,133 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [stock, setStock] = useState<string>('0');
+  const [price, setPrice] = useState<string>('0');
   const [minStock, setMinStock] = useState<string>('5');
+  const [category, setCategory] = useState<string>('عام');
+  const [unit, setUnit] = useState<string>('وحدة');
 
-  // Interactive Table Grid State for Excel Copy-Paste & Batch Add
-  const [gridRows, setGridRows] = useState<Array<{ id: string; code: string; name: string; stock: string }>>([]);
+  // Interactive Table Grid State for Excel Copy-Paste & Batch Add (Price column included for input, NO total column here)
+  const [gridRows, setGridRows] = useState<Array<{ id: string; code: string; name: string; stock: string; price: string }>>([]);
   const [pasteMessage, setPasteMessage] = useState('');
 
-  // Side Cart for "أمر تسليم مخزن"
+  // Side Cart for "فاتورة مبيعات"
   const [cartItems, setCartItems] = useState<Array<{ product: Product; quantity: number }>>([]);
   const [recipientName, setRecipientName] = useState<string>('');
   const [activeDeliveryItems, setActiveDeliveryItems] = useState<DispatchItem[] | null>(null);
   const [activeDeliveryOrderNo, setActiveDeliveryOrderNo] = useState<string>('');
-  const [activeRecipientName, setActiveRecipientName] = useState<string>('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [isInventoryReportOpen, setIsInventoryReportOpen] = useState(false);
 
-  // Strictly filter products to the active warehouse to guarantee 100% database & UI isolation
-  const currentWarehouseId = activeWarehouse || 'EASTERN';
-  const warehouseProducts = useMemo(() => {
-    return products.filter(p => (p.warehouseId || p.warehouse_id || 'EASTERN') === currentWarehouseId);
-  }, [products, currentWarehouseId]);
+  // Direct unified sales catalog: all products belong to the direct sales system
+  const catalogProducts = products;
 
-  // Reset selection and cart on warehouse change
-  useEffect(() => {
-    setSelectedProductId(null);
-    setSearchTerm('');
-    setCartItems([]);
-  }, [activeWarehouse]);
-
-  // Key Inventory Metrics
+  // Key Sales & Inventory Metrics
   const metrics = useMemo(() => {
-    const totalItems = warehouseProducts.length;
-    const totalUnits = warehouseProducts.reduce((acc, p) => acc + p.stock, 0);
-    const lowStockCount = warehouseProducts.filter(p => p.stock <= (p.minStock || 5)).length;
+    const totalItems = catalogProducts.length;
+    const totalUnits = catalogProducts.reduce((acc, p) => acc + p.stock, 0);
+    const lowStockCount = catalogProducts.filter(p => p.stock <= (p.minStock || 5)).length;
     return { totalItems, totalUnits, lowStockCount };
-  }, [warehouseProducts]);
+  }, [catalogProducts]);
 
   // Filter products using Arabic Smart Search Engine
   const filteredProducts = useMemo(() => {
-    return searchAndRank(warehouseProducts, searchTerm, (p: Product) => [p.name, p.code]);
-  }, [warehouseProducts, searchTerm]);
+    return searchAndRank(catalogProducts, searchTerm, (p: Product) => [p.name, p.code]);
+  }, [catalogProducts, searchTerm]);
 
-  // Cart Calculations (Pure Physical Quantities Dispatched)
+  // Cart Calculations (Quantities & Total Order Value on demand)
   const cartTotals = useMemo(() => {
     const totalQuantity = cartItems.reduce((acc, item) => acc + item.quantity, 0);
+    const totalOrderValue = cartItems.reduce((acc, item) => {
+      const p = Number(item.product.price) || 0;
+      return acc + (p * item.quantity);
+    }, 0);
     return {
       totalItems: cartItems.length,
       totalQuantity,
+      totalOrderValue,
     };
   }, [cartItems]);
 
-  // Direct Click-to-Add to Side Delivery Order Cart
+  // Direct Click-to-Add to Side Sales Invoice Cart
   const handleToggleProductCart = (product: Product) => {
     if (!product || !product.id) return;
     const pId = String(product.id);
-    const liveProd = warehouseProducts.find(p => String(p.id) === pId) || products.find(p => String(p.id) === pId) || product;
+    const liveProd = catalogProducts.find(p => String(p.id) === pId) || product;
     if (liveProd.stock <= 0) {
-      alert(`عفواً، الصنف (${liveProd.name}) غير متوفر بالمخزن حالياً (الرصيد المتاح: 0).`);
+      alert(`عفواً، الصنف (${liveProd.name}) غير متوفر حالياً (الرصيد المتاح: 0).`);
       return;
     }
 
     setCartItems(prev => {
-      const existingIndex = prev.findIndex(item => String(item.product.id) === pId);
-      if (existingIndex !== -1) {
-        const existing = prev[existingIndex];
-        if (existing.quantity >= liveProd.stock) {
-          alert(`تنبيه: الرصيد المتاح من (${liveProd.name}) هو ${liveProd.stock} قطعة فقط. لا يمكن تجاوز هذا الرصيد.`);
-          return prev;
-        }
-        const updated = [...prev];
-        updated[existingIndex] = { ...existing, quantity: existing.quantity + 1, product: liveProd };
-        return updated;
+      const existsIndex = prev.findIndex(item => String(item.product.id) === pId);
+      if (existsIndex > -1) {
+        return prev.filter((_, idx) => idx !== existsIndex);
       } else {
         return [...prev, { product: liveProd, quantity: 1 }];
       }
     });
   };
 
-  const handleUpdateCartQuantity = (productId: string, newQty: number) => {
-    if (!productId) return;
-    const targetId = String(productId);
-    if (newQty <= 0) {
-      handleRemoveFromCart(targetId);
-      return;
-    }
-    const liveProd = warehouseProducts.find(p => String(p.id) === targetId) || products.find(p => String(p.id) === targetId);
-    const maxStock = liveProd ? liveProd.stock : 0;
+  const handleUpdateCartQuantity = (productId: string, quantity: number) => {
+    const pId = String(productId);
+    const targetProduct = catalogProducts.find(p => String(p.id) === pId);
+    const maxAvailable = targetProduct ? targetProduct.stock : 99999;
 
-    if (newQty > maxStock) {
-      alert(`عفواً، الرصيد المتاح بالمخزن للصنف (${liveProd?.name || ''}) هو ${maxStock} قطعة فقط! لا يمكن طلب ${newQty} قطعة.`);
-      newQty = maxStock;
+    if (quantity > maxAvailable) {
+      alert(`عفواً، أقصى رصيد متاح للصنف (${targetProduct?.name}) هو ${maxAvailable} وحدة.`);
+      quantity = maxAvailable;
     }
 
-    setCartItems(prev =>
-      prev.map(item =>
-        String(item.product.id) === targetId
-          ? { ...item, quantity: newQty, product: liveProd || item.product }
-          : item
-      )
-    );
+    if (quantity <= 0) {
+      setCartItems(prev => prev.filter(item => String(item.product.id) !== pId));
+    } else {
+      setCartItems(prev =>
+        prev.map(item => (String(item.product.id) === pId ? { ...item, quantity } : item))
+      );
+    }
   };
 
   const handleRemoveFromCart = (productId: string) => {
-    if (!productId) return;
-    const targetId = String(productId);
-    setCartItems(prev => prev.filter(item => String(item.product.id) !== targetId));
+    const pId = String(productId);
+    setCartItems(prev => prev.filter(item => String(item.product.id) !== pId));
   };
 
   const handleClearCart = () => {
     setCartItems([]);
   };
 
-  // Sequential Invoice Number Generator starting from 1 (1, 2, 3, 4...)
-  const getNextInvoiceNo = (): string => {
-    let maxSeq = 0; // Starts at 0 so first document is 1
-
-    try {
-      const savedSeq = localStorage.getItem('nasser_last_delivery_order_seq_v2');
-      if (savedSeq) {
-        const parsedSeq = parseInt(savedSeq, 10);
-        if (!isNaN(parsedSeq) && parsedSeq > maxSeq) {
-          maxSeq = parsedSeq;
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-
-    const allMovements = movements || [];
-    let savedMovements: StockMovement[] = [];
-    try {
-      const raw = localStorage.getItem('nasser_warehouse_movements_v1');
-      if (raw) savedMovements = JSON.parse(raw);
-    } catch (e) {
-      // ignore
-    }
-
-    const combined = [...allMovements, ...savedMovements];
-
-    combined.forEach(m => {
-      if (m.referenceNo) {
-        const match = m.referenceNo.match(/\d+/g);
-        if (match) {
-          const val = parseInt(match.join(''), 10);
-          if (!isNaN(val) && val > maxSeq) {
-            maxSeq = val;
-          }
-        }
-      }
-    });
-
-    return String(maxSeq + 1);
+  // Helper to generate next sequential invoice number
+  const getNextInvoiceNo = () => {
+    const currentYear = new Date().getFullYear();
+    const storedSeq = localStorage.getItem('nosser_sales_invoice_seq') || localStorage.getItem('nosser_last_delivery_order_seq_v2') || '0';
+    const nextSeq = (parseInt(storedSeq, 10) || 0) + 1;
+    return `INV-${currentYear}-${String(nextSeq).padStart(4, '0')}`;
   };
 
-  // Complete Order & Print Delivery Order Document
+  // Process Sales Invoice Generation and Direct Printing
   const handleCompleteInvoice = async () => {
-    if (!cartItems || cartItems.length === 0) {
-      alert('💡 تنبيه: سلة أمر تسليم المخزن فارغة حالياً. يرجى اختيار الأصناف أولاً.');
-      return;
-    }
-    if (!recipientName.trim()) {
-      alert('تنبيه هام: يرجى كتابة اسم المستلم / الجهة المستلمة قبل طباعة أمر تسليم المخزن.');
+    if (cartItems.length === 0) {
+      alert('💡 تنبيه: سلة فاتورة المبيعات فارغة حالياً. يرجى اختيار الأصناف أولاً.');
       return;
     }
 
-    // Pre-flight validation: check all cart items against current stock with numeric normalization
+    if (!recipientName.trim()) {
+      alert('تنبيه هام: يرجى كتابة اسم العميل / المستلم قبل إصدار وطباعة فاتورة المبيعات.');
+      return;
+    }
+
+    // Pre-flight validation: check all cart items against current stock
     for (const item of cartItems) {
       const pId = String(item.product.id || '');
-      const pCode = String(item.product.code || '').trim().toLowerCase();
-      const pName = String(item.product.name || '').trim().toLowerCase();
-      const liveProd = products.find(p => 
-        (pId && String(p.id) === pId) || 
-        (pCode && p.code.trim().toLowerCase() === pCode) ||
-        (pName && p.name.trim().toLowerCase() === pName)
-      ) || item.product;
+      const liveProd = catalogProducts.find(p => String(p.id) === pId) || item.product;
 
       const available = Number(liveProd ? liveProd.stock : item.product.stock) || 0;
       const requestedQty = Math.max(1, Number(item.quantity) || 1);
 
       if (available <= 0) {
-        alert(`خطأ في العملية: الصنف (${item.product.name}) غير متوفر بالمخزن (الرصيد: 0). يرجى إزالته من سلة أمر التسليم.`);
+        alert(`خطأ في العملية: الصنف (${item.product.name}) غير متوفر (الرصيد: 0). يرجى إزالته من سلة الفاتورة.`);
         return;
       }
       if (requestedQty > available) {
@@ -270,184 +210,132 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setFormError('');
 
     try {
-      const finalOrderNo = getNextInvoiceNo();
+      const finalInvoiceNo = getNextInvoiceNo();
 
-      // Persist generated delivery order sequence number immediately
-      const numVal = parseInt(finalOrderNo, 10);
-      if (!isNaN(numVal)) {
-        try {
-          const currentSeq = parseInt(localStorage.getItem('nosser_last_delivery_order_seq_v2') || localStorage.getItem('nasser_last_delivery_order_seq_v2') || '0', 10);
-          if (numVal >= currentSeq) {
-            localStorage.setItem('nosser_last_delivery_order_seq_v2', String(numVal));
-          }
-        } catch (e) {
-          // ignore
+      // Persist sequence number immediately
+      const numMatch = finalInvoiceNo.match(/\d+$/);
+      if (numMatch) {
+        const numVal = parseInt(numMatch[0], 10);
+        if (!isNaN(numVal)) {
+          localStorage.setItem('nosser_sales_invoice_seq', String(numVal));
         }
       }
 
       const dispatchItemsToPrint: DispatchItem[] = cartItems.map(item => {
         const pId = String(item.product.id || '');
-        const pCode = String(item.product.code || '').trim().toLowerCase();
-        const pName = String(item.product.name || '').trim().toLowerCase();
-        const liveProd = products.find(p => 
-          (pId && String(p.id) === pId) || 
-          (pCode && p.code.trim().toLowerCase() === pCode) ||
-          (pName && p.name.trim().toLowerCase() === pName)
-        ) || item.product;
-
+        const liveProd = catalogProducts.find(p => String(p.id) === pId) || item.product;
         const qty = Math.max(1, Number(item.quantity) || 1);
+        const unitPrice = Number(liveProd.price) || 0;
         return {
           product: liveProd,
           quantity: qty,
+          unitPrice,
+          totalPrice: unitPrice * qty,
         };
       });
 
       const batchItemsPayload = cartItems.map(item => {
         const pId = String(item.product.id || '');
-        const pCode = String(item.product.code || '').trim().toLowerCase();
-        const pName = String(item.product.name || '').trim().toLowerCase();
-        const liveProd = products.find(p => 
-          (pId && String(p.id) === pId) || 
-          (pCode && p.code.trim().toLowerCase() === pCode) ||
-          (pName && p.name.trim().toLowerCase() === pName)
-        ) || item.product;
-
+        const liveProd = catalogProducts.find(p => String(p.id) === pId) || item.product;
         const qty = Math.max(1, Number(item.quantity) || 1);
+        const unitPrice = Number(liveProd.price) || 0;
 
         return {
           productId: String(liveProd.id || item.product.id || ''),
           productCode: String(liveProd.code || item.product.code || ''),
           productName: String(liveProd.name || item.product.name || ''),
           quantity: qty,
+          unitPrice,
+          totalPrice: unitPrice * qty,
         };
       });
 
-      // Use atomic batch movement if available (100% resilient against Database Lock)
+      // Use atomic batch movement for direct sales invoice
       if (onBatchStockMovement) {
         const res = await onBatchStockMovement({
           items: batchItemsPayload,
-          referenceNo: finalOrderNo,
-          reason: `أمر تسليم مخزن - المستلم: ${recipientName.trim()}`,
+          referenceNo: finalInvoiceNo,
+          reason: `فاتورة مبيعات - المستلم/العميل: ${recipientName.trim()}`,
         });
 
         if (res && res.success === false) {
-          const errMsg = res.message || 'فشلت عملية إصدار أمر تسليم المخزن، يرجى مراجعة البيانات';
+          const errMsg = res.message || 'فشلت عملية إصدار فاتورة المبيعات، يرجى مراجعة البيانات';
           setFormError(errMsg);
           return;
         }
       } else {
-        // Fallback for sequential stock movement
+        // Fallback
         for (const item of batchItemsPayload) {
           const res = await onStockMovement({
             productId: item.productId,
-            productCode: item.productCode,
-            productName: item.productName,
             type: 'OUT',
             quantity: item.quantity,
-            reason: `أمر تسليم مخزن - المستلم: ${recipientName.trim()}`,
-            referenceNo: finalOrderNo,
+            reason: `فاتورة مبيعات - المستلم/العميل: ${recipientName.trim()}`,
+            referenceNo: finalInvoiceNo,
           });
 
           if (res && res.success === false) {
-            const errMsg = res.message || 'فشلت عملية صرف الصنف بأمر التسليم';
+            const errMsg = res.message || 'فشلت عملية صرف الصنف بالفاتورة';
             setFormError(errMsg);
             return;
           }
         }
       }
 
-      // Open Modal for immediate print
+      // Open Modal for immediate preview and print
       setActiveDeliveryItems(dispatchItemsToPrint);
-      setActiveDeliveryOrderNo(finalOrderNo);
-      setActiveRecipientName(recipientName.trim());
+      setActiveDeliveryOrderNo(finalInvoiceNo);
 
       // Reset cart and recipient
       setCartItems([]);
       setRecipientName('');
     } catch (err: any) {
-      console.error('Delivery order execution error:', err);
-      setFormError('حدث خطأ أثناء معالجة أمر تسليم المخزن');
+      setFormError('حدث خطأ أثناء معالجة فاتورة المبيعات');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Explicit Global Keyboard Shortcut (Ctrl + P / Cmd + P) in Inventory View
-  useEffect(() => {
-    const handleInventoryPrintShortcut = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        // If delivery order preview modal is already open, let DeliveryOrderModal handle it
-        if (activeDeliveryItems && activeDeliveryItems.length > 0) {
-          return;
-        }
-
-        // If inventory report modal is already open, it handles it
-        if (isInventoryReportOpen) {
-          return;
-        }
-
-        // If items are present in cart, complete and issue the delivery order immediately
-        if (cartItems.length > 0) {
-          if (!recipientName.trim()) {
-            setRecipientName('تسليم مخزني مباشر');
-          }
-          handleCompleteInvoice();
-          return;
-        }
-
-        // Otherwise, open the official inventory stock report for verified, crystal-clear printing
-        setIsInventoryReportOpen(true);
-      }
-    };
-
-    window.addEventListener('keydown', handleInventoryPrintShortcut, true);
-    return () => window.removeEventListener('keydown', handleInventoryPrintShortcut, true);
-  }, [cartItems, recipientName, activeDeliveryItems, products, isInventoryReportOpen]);
-
-  // Automated Next Sequential Code Generator (NOSSER-E101, NOSSER-W101, NOSSER-A101...)
+  // Helper to generate the next unique code
   const generateNextCode = (currentList: Product[] = products): string => {
-    const prefixLetter = activeWarehouse === 'WESTERN' ? 'W' : activeWarehouse === 'AUXILIARY' ? 'A' : 'E';
     let maxNum = 100;
     currentList.forEach(p => {
-      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(?:[EWA])?(\d+)$/i) || p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
         const num = parseInt(match[1] || match[0], 10);
-        if (!isNaN(num) && num > maxNum) {
-          maxNum = num;
-        }
+        if (!isNaN(num) && num > maxNum) maxNum = num;
       }
     });
-    return `NOSSER-${prefixLetter}${maxNum + 1}`;
+    return `NOSSER-${maxNum + 1}`;
   };
 
-  // Open Single Add Product Modal
+  // Open Single Add Modal
   const openAddModal = () => {
     if (!isGeneralManager) {
-      alert('عفواً، خيارات إضافة وتعديل الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
+      alert('عفواً، خيارات إضافة وتعديل الأصناف هي صلاحيات حصرية للمدير العام فقط.');
       return;
     }
     setEditingProduct(null);
     setCode(generateNextCode());
     setName('');
-    setStock('1');
+    setStock('0');
+    setPrice('0');
     setMinStock('5');
+    setCategory('عام');
+    setUnit('وحدة');
     setFormError('');
     setIsModalOpen(true);
   };
 
-  // Open Batch Add Products (Excel / Grid Mode)
+  // Open Batch Add Screen (Excel mode)
   const openBatchAddModal = () => {
     if (!isGeneralManager) {
-      alert('عفواً، خيارات إضافة وتعديل الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
+      alert('عفواً، خيارات إضافة وتعديل الأصناف هي صلاحيات حصرية للمدير العام فقط.');
       return;
     }
-    const prefixLetter = activeWarehouse === 'WESTERN' ? 'W' : activeWarehouse === 'AUXILIARY' ? 'A' : 'E';
     let startingNum = 100;
     products.forEach(p => {
-      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(?:[EWA])?(\d+)$/i) || p.code.match(/\d+/);
+      const match = p.code.match(/^(?:NOSSER-|NASSER-)?(\d+)$/i) || p.code.match(/\d+/);
       if (match) {
         const num = parseInt(match[1] || match[0], 10);
         if (!isNaN(num) && num > startingNum) startingNum = num;
@@ -456,16 +344,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     const initialFive = Array.from({ length: 5 }, (_, i) => ({
       id: `init_${Date.now()}_${i}`,
-      code: `NOSSER-${prefixLetter}${startingNum + 1 + i}`,
+      code: `NOSSER-${startingNum + 1 + i}`,
       name: '',
       stock: '1',
+      price: '0',
     }));
     setGridRows(initialFive);
     setPasteMessage('');
     setIsBatchAddMode(true);
   };
 
-  // Process Pasted Text from Excel / Clipboard
+  // Process Pasted Text from Excel / Clipboard with Price detection
   const processPastedText = (rawText: string) => {
     if (!rawText || !rawText.trim()) return;
 
@@ -492,10 +381,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       }
     });
 
-    const parsedRows: Array<{ id: string; code: string; name: string; stock: string }> = [];
+    const parsedRows: Array<{ id: string; code: string; name: string; stock: string; price: string }> = [];
 
     lines.forEach((line) => {
-      // Split by tab (Excel copy), comma, or multiple spaces
       const parts = line.includes('\t')
         ? line.split('\t')
         : line.includes(',')
@@ -503,35 +391,39 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         : line.split(/\s{2,}/);
 
       const cleanParts = parts.map(p => p.trim()).filter(Boolean);
-
       if (cleanParts.length === 0) return;
 
       baseNum += 1;
       let parsedCode = `NOSSER-${baseNum}`;
       let parsedName = '';
       let parsedStock = '1';
+      let parsedPrice = '0';
 
       if (cleanParts.length === 1) {
         parsedName = cleanParts[0];
       } else if (cleanParts.length === 2) {
-        // [Name, Quantity] OR [Code, Name]
+        // [Name, Quantity] OR [Name, Price]
         if (!isNaN(Number(cleanParts[1]))) {
           parsedName = cleanParts[0];
           parsedStock = String(Math.max(0, parseInt(cleanParts[1], 10) || 1));
         } else {
-          parsedCode = cleanParts[0].startsWith('NOSSER-') || cleanParts[0].startsWith('NASSER-') ? cleanParts[0] : `NOSSER-${cleanParts[0]}`;
           parsedName = cleanParts[1];
         }
-      } else if (cleanParts.length >= 3) {
-        // [Code, Name, Quantity] OR [Name, Quantity, ...]
-        if (isNaN(Number(cleanParts[0])) && !isNaN(Number(cleanParts[1]))) {
+      } else if (cleanParts.length === 3) {
+        // [Name, Quantity, UnitPrice] OR [Code, Name, Quantity]
+        if (isNaN(Number(cleanParts[0]))) {
           parsedName = cleanParts[0];
           parsedStock = String(Math.max(0, parseInt(cleanParts[1], 10) || 1));
+          parsedPrice = String(Math.max(0, parseFloat(cleanParts[2]) || 0));
         } else {
-          parsedCode = cleanParts[0].startsWith('NOSSER-') || cleanParts[0].startsWith('NASSER-') ? cleanParts[0] : `NOSSER-${cleanParts[0]}`;
           parsedName = cleanParts[1];
           parsedStock = String(Math.max(0, parseInt(cleanParts[2], 10) || 1));
         }
+      } else if (cleanParts.length >= 4) {
+        // [Code, Name, Quantity, UnitPrice]
+        parsedName = cleanParts[1];
+        parsedStock = String(Math.max(0, parseInt(cleanParts[2], 10) || 1));
+        parsedPrice = String(Math.max(0, parseFloat(cleanParts[3]) || 0));
       }
 
       if (parsedName) {
@@ -540,6 +432,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           code: parsedCode,
           name: parsedName,
           stock: parsedStock,
+          price: parsedPrice,
         });
       }
     });
@@ -549,7 +442,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         const withoutEmpty = prev.filter(r => r.name.trim().length > 0);
         return [...withoutEmpty, ...parsedRows];
       });
-      setPasteMessage(`✅ تم استيراد ولصق عدد (${parsedRows.length}) صنف من جدول Excel بنجاح.`);
+      setPasteMessage(`✅ تم استيراد ولصق عدد (${parsedRows.length}) صنف من جدول Excel بنجاح مع تحديد الكميات والأسعار.`);
       setTimeout(() => setPasteMessage(''), 5000);
     }
   };
@@ -573,20 +466,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }
       });
 
-      const newFive: Array<{ id: string; code: string; name: string; stock: string }> = [];
+      const newFive: Array<{ id: string; code: string; name: string; stock: string; price: string }> = [];
       for (let i = 1; i <= 5; i++) {
         newFive.push({
           id: `row_${Date.now()}_${Math.random().toString(36).substring(2, 5)}_${i}`,
           code: `NOSSER-${maxNum + i}`,
           name: '',
           stock: '1',
+          price: '0',
         });
       }
       return [...prev, ...newFive];
     });
   };
 
-  const handleGridCellChange = (id: string, field: 'code' | 'name' | 'stock', value: string) => {
+  const handleGridCellChange = (id: string, field: 'code' | 'name' | 'stock' | 'price', value: string) => {
     setGridRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
   };
 
@@ -594,7 +488,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setGridRows(prev => prev.filter(r => r.id !== id));
   };
 
-  // Save Batch Products
+  // Save Batch Products from Data Entry Screen
   const handleConfirmBatchAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
@@ -618,11 +512,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           code: finalCode,
           name: r.name.trim(),
           stock: parseInt(r.stock, 10) || 0,
+          price: Math.max(0, parseFloat(r.price) || 0), // سعر الوحدة المحدد أثناء الإدخال
           category: 'عام',
           minStock: 5,
           unit: 'وحدة',
-          warehouseId: activeWarehouse,
-          warehouseName: activeWarehouse ? WAREHOUSES[activeWarehouse]?.name : undefined,
         };
       });
 
@@ -632,7 +525,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           setIsBatchAddMode(false);
           setIsModalOpen(false);
         } else {
-          setFormError(res.message || 'فشلت عملية حفظ الأصناف بالمخزن');
+          setFormError(res.message || 'فشلت عملية حفظ الأصناف');
         }
       } else {
         for (const item of itemsToSave) {
@@ -642,7 +535,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         setIsModalOpen(false);
       }
     } catch (err: any) {
-      setFormError('حدث خطأ أثناء حفظ الأصناف بالمخزن');
+      setFormError('حدث خطأ أثناء حفظ الأصناف في النظام');
     } finally {
       setIsSubmitting(false);
     }
@@ -651,19 +544,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   // Open Edit Product Modal
   const openEditModal = (product: Product) => {
     if (!isGeneralManager) {
-      alert('عفواً، خيارات تعديل بيانات الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
+      alert('عفواً، خيارات تعديل بيانات الأصناف هي صلاحيات حصرية للمدير العام فقط.');
       return;
     }
     setEditingProduct(product);
     setCode(product.code);
     setName(product.name);
     setStock(String(product.stock));
+    setPrice(String(product.price || 0));
     setMinStock(String(product.minStock || 5));
+    setCategory(product.category || 'عام');
+    setUnit(product.unit || 'وحدة');
     setFormError('');
     setIsModalOpen(true);
   };
 
-  // Save Add / Edit Product
+  // Save Single Add / Edit Product
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isGeneralManager) {
@@ -686,14 +582,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         formattedCode = `NOSSER-${formattedCode}`;
       }
 
+      const parsedPrice = Math.max(0, parseFloat(price) || 0);
+
       if (editingProduct) {
         const res = await onUpdateProduct(editingProduct.id, {
           code: formattedCode || editingProduct.code,
           name: name.trim(),
           stock: Math.max(0, parseInt(stock, 10) || 0),
+          price: parsedPrice, // سعر الوحدة المحدث
           minStock: Math.max(1, parseInt(minStock, 10) || 5),
-          category: editingProduct.category || 'عام',
-          unit: editingProduct.unit || 'وحدة',
+          category: category.trim() || 'عام',
+          unit: unit.trim() || 'وحدة',
           description: editingProduct.description || '',
         });
         if (res.success) {
@@ -705,12 +604,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         const res = await onAddProduct({
           code: formattedCode,
           name: name.trim(),
-          category: 'عام',
+          category: category.trim() || 'عام',
           stock: Math.max(0, parseInt(stock, 10) || 0),
+          price: parsedPrice, // سعر الوحدة المحدد عند الإدخال
           minStock: Math.max(1, parseInt(minStock, 10) || 5),
-          unit: 'وحدة',
-          warehouseId: activeWarehouse,
-          warehouseName: activeWarehouse ? WAREHOUSES[activeWarehouse]?.name : undefined,
+          unit: unit.trim() || 'وحدة',
           description: '',
         });
         if (res.success) {
@@ -719,6 +617,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           setCode('');
           setName('');
           setStock('0');
+          setPrice('0');
           setMinStock('5');
         } else {
           setFormError(res.message || 'فشلت عملية إضافة الصنف');
@@ -733,7 +632,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   const handleDeleteProductConfirm = async (id: string, nameStr: string) => {
     if (!isGeneralManager) {
-      alert('عفواً، خيارات حذف الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
+      alert('عفواً، خيارات حذف الأصناف هي صلاحيات حصرية للمدير العام فقط.');
       return;
     }
     if (window.confirm(`هل أنت متأكد من حذف الصنف "${nameStr}" نهائياً من قاعدة البيانات؟`)) {
@@ -742,6 +641,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
+  // -------------------------------------------------------------
+  // SCREEN: BATCH DATA ENTRY / PURCHASES GRID (Excel Mode)
+  // Shows: Code, Name, Quantity/Stock, Unit Price (NO Total column here)
+  // -------------------------------------------------------------
   if (isBatchAddMode) {
     return (
       <div
@@ -761,15 +664,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs transition flex items-center gap-2 cursor-pointer shadow-xs"
             >
               <ArrowRight className="w-4 h-4 text-blue-600" />
-              <span>العودة إلى جدول الجرد والمخزن</span>
+              <span>العودة إلى شاشة المبيعات</span>
             </button>
             <div>
               <h2 className="text-lg md:text-xl font-extrabold text-slate-900 flex items-center gap-2">
                 <Package className="w-6 h-6 text-blue-600" />
-                <span>شاشة إضافة أصناف وتوريدات جديدة للمخزن</span>
+                <span>شاشة إدخال البيانات وعملية الشراء والتوريد</span>
               </h2>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                إدخال الأصناف والأسعار - ترقيم الأكواد أوتوماتيكياً - دعم اللصق المباشر من Excel (Ctrl + V)
+                تحديد اسم الصنف والكمية وسعر الوحدة - ترقيم تسلسلي أوتوماتيكي - دعم اللصق المباشر من Excel (Ctrl + V)
               </p>
             </div>
           </div>
@@ -798,6 +701,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         )}
 
+        {/* Excel Paste Zone */}
         <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border border-blue-200 rounded-2xl p-5 shadow-xs space-y-2">
           <div className="flex items-center justify-between">
             <label className="text-sm font-extrabold text-blue-950 flex items-center gap-2">
@@ -805,12 +709,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <span>منطقة اللصق السريع المباشر من إكسل (Ctrl + V)</span>
             </label>
             <span className="text-xs bg-blue-100 text-blue-800 px-2.5 py-1 rounded-lg font-bold">
-              نسخ الأعمدة (الاسم، الكمية/الرصيد)
+              نسخ الأعمدة: (اسم الصنف، الكمية، سعر الوحدة)
             </span>
           </div>
           <textarea
             rows={3}
-            placeholder="اضغط (Ctrl + V) هنا في هذه المنطقة أو في أي مكان بالشاشة لصق بيانات جدول الإكسل المنسوخ وسيقوم النظام بتنسيقها وتوزيع الخانات تلقائياً..."
+            placeholder="اضغط (Ctrl + V) هنا أو في أي مكان بالشاشة للصق بيانات جدول الإكسل وسيقوم النظام بتوزيع الخانات والأسعار تلقائياً..."
             onChange={(e) => {
               if (e.target.value) {
                 processPastedText(e.target.value);
@@ -835,16 +739,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <thead>
                   <tr className="bg-[#0F172A] text-white font-extrabold text-xs sm:text-sm border-b border-slate-800">
                     <th className="p-3.5 w-12 text-center">#</th>
-                    <th className="p-3.5 w-44 sm:w-52">الكود / Serial Number (تلقائي ومحمي)</th>
+                    <th className="p-3.5 w-44 sm:w-52">الكود / Serial (تلقائي ومحمي)</th>
                     <th className="p-3.5">اسم الصنف بالكامل</th>
-                    <th className="p-3.5 w-28 sm:w-32 text-center">الرصيد / الكمية بالمخزن</th>
+                    <th className="p-3.5 w-28 sm:w-32 text-center">الكمية / الرصيد المسجل</th>
+                    <th className="p-3.5 w-32 sm:w-36 text-center bg-blue-950/80">سعر الوحدة (ج.س)</th>
                     <th className="p-3.5 w-16 text-center">حذف</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
                   {gridRows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-12 text-center text-slate-400 font-bold">
+                      <td colSpan={6} className="p-12 text-center text-slate-400 font-bold">
                         لا توجد أصناف بالجدول. اضغط إضافة صفوف جديدة أو قم باللصق من Excel.
                       </td>
                     </tr>
@@ -858,8 +763,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             readOnly
                             disabled
                             value={row.code}
-                            placeholder="1001"
-                            title="يتم توليد السيريال نمبر تلقائياً وغير قابل للتعديل اليدوي"
                             className="w-full px-3 py-2 border border-slate-300 bg-slate-100 rounded-xl font-mono font-black text-slate-700 text-center text-xs sm:text-sm cursor-not-allowed select-none shadow-inner"
                           />
                         </td>
@@ -882,6 +785,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono font-black text-slate-900 text-center text-xs sm:text-sm focus:border-blue-600 focus:ring-1 focus:ring-blue-500 focus:outline-none shadow-xs"
                           />
                         </td>
+                        <td className="p-3 bg-blue-50/40">
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={row.price}
+                            onChange={(e) => handleGridCellChange(row.id, 'price', e.target.value)}
+                            placeholder="0"
+                            title="حدد سعر الوحدة أثناء الإدخال"
+                            className="w-full px-3 py-2 border border-blue-300 rounded-xl font-mono font-black text-blue-950 text-center text-xs sm:text-sm focus:border-blue-600 focus:ring-1 focus:ring-blue-500 focus:outline-none shadow-xs bg-white"
+                          />
+                        </td>
                         <td className="p-3 text-center">
                           <button
                             type="button"
@@ -902,10 +817,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <button
                 type="button"
                 onClick={handleAddFiveRows}
-                className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer"
               >
                 <Plus className="w-4 h-4 text-blue-600" />
-                <span>إضافة (5) صفوف فارغة جديدة</span>
+                <span>إضافة 5 صفوف جديدة فارغة</span>
               </button>
 
               <div className="flex items-center gap-3">
@@ -918,75 +833,49 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-7 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-xs sm:text-sm shadow-md shadow-blue-200 transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  disabled={isSubmitting || gridRows.filter(r => r.name.trim()).length === 0}
+                  className="px-7 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-xs flex items-center gap-2 shadow-md shadow-blue-900/30 transition cursor-pointer disabled:opacity-50"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>{isSubmitting ? 'جاري حفظ الأصناف...' : 'اعتماد وحفظ كافة الأصناف بالمخزن'}</span>
+                  <Check className="w-4 h-4" />
+                  <span>{isSubmitting ? 'جاري الحفظ...' : `حفظ وتأكيد الأصناف (${gridRows.filter(r => r.name.trim()).length})`}</span>
                 </button>
               </div>
             </div>
-
           </div>
         </form>
-
       </div>
     );
   }
 
-  const whConfig = activeWarehouse ? WAREHOUSES[activeWarehouse] : null;
-
+  // -------------------------------------------------------------
+  // MAIN VIEW: DIRECT SALES SYSTEM & INVOICING INTERFACE
+  // -------------------------------------------------------------
   return (
-    <div className="space-y-6 animate-fadeIn pb-12">
+    <div className="space-y-6">
       
-      {/* Top Warehouse Dedicated Dashboard Banner */}
-      <div className={`p-6 rounded-2xl border shadow-sm no-print transition-all ${
-        whConfig
-          ? activeWarehouse === 'EASTERN'
-            ? 'bg-gradient-to-r from-blue-950 via-slate-900 to-slate-900 border-blue-800 text-white'
-            : activeWarehouse === 'WESTERN'
-            ? 'bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border-emerald-800 text-white'
-            : 'bg-gradient-to-r from-amber-950 via-slate-900 to-slate-900 border-amber-800 text-white'
-          : 'bg-white border-slate-200 text-slate-900'
-      }`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-lg ${
-              whConfig
-                ? activeWarehouse === 'EASTERN'
-                  ? 'bg-blue-600 text-white shadow-blue-900/50'
-                  : activeWarehouse === 'WESTERN'
-                  ? 'bg-emerald-600 text-white shadow-emerald-900/50'
-                  : 'bg-amber-600 text-white shadow-amber-900/50'
-                : 'bg-blue-600 text-white'
-            }`}>
-              <Building2 className="w-8 h-8" />
+      {/* Sales Header Banner */}
+      <div className="relative overflow-hidden rounded-3xl p-6 sm:p-7 shadow-xl border bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 border-blue-800/50 text-white">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black shadow-lg shrink-0 bg-blue-600 text-white shadow-blue-900/50">
+              <Receipt className="w-8 h-8" />
             </div>
 
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-xl md:text-2xl font-black tracking-tight font-['Tajawal']">
-                  {whConfig ? `لوحة تحكم ${whConfig.name}` : 'إدارة المخزن وأوامر تسليم المخزن'}
+                  نظام المبيعات المباشر - شركة NOSSER
                 </h2>
-                {whConfig && (
-                  <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
-                    activeWarehouse === 'EASTERN'
-                      ? 'bg-blue-500/20 text-blue-300 border-blue-400/40'
-                      : activeWarehouse === 'WESTERN'
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
-                      : 'bg-amber-500/20 text-amber-300 border-amber-400/40'
-                  }`}>
-                    كود: {whConfig.shortCode}
-                  </span>
-                )}
-                <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-md font-bold">
-                  عزل تام للأرصدة والحركات
+                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full border bg-blue-500/20 text-blue-300 border-blue-400/40">
+                  مبيعات فورية معتمدة
+                </span>
+                <span className="text-[10px] bg-slate-800 text-emerald-400 border border-slate-700 px-2 py-0.5 rounded-md font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
+                  نظام مبيعات موحد
                 </span>
               </div>
-              <p className={`text-xs font-semibold ${whConfig ? 'text-slate-300' : 'text-slate-500'}`}>
-                {whConfig
-                  ? `${whConfig.tagline} — ${whConfig.description}`
-                  : 'نظام متكامل لإدارة الأصناف والمخزون، وإصدار وطباعة أوامر تسليم المخزن الفورية'}
+              <p className="text-xs font-semibold text-slate-300">
+                نظام متكامل لإدارة أصناف المبيعات، إدخال المشتريات بالأسعار، وإصدار وطباعة فواتير المبيعات الفورية
               </p>
             </div>
           </div>
@@ -1035,9 +924,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <Boxes className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold">
-              {whConfig ? `أصناف ${whConfig.name}` : 'إجمالي الأصناف المسجلة'}
-            </p>
+            <p className="text-xs text-slate-500 font-bold">إجمالي أصناف المبيعات المسجلة</p>
             <p className="text-lg font-black text-slate-900 font-mono">{toArabicNumerals(metrics.totalItems)} صنف</p>
           </div>
         </div>
@@ -1047,9 +934,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <Package className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold">
-              {whConfig ? `رصيد وحدات ${whConfig.name}` : 'إجمالي القطع المتوفرة بالمخزن'}
-            </p>
+            <p className="text-xs text-slate-500 font-bold">إجمالي القطع المتوفرة للبيع</p>
             <p className="text-lg font-black text-emerald-700 font-mono">{toArabicNumerals(metrics.totalUnits)} وحدة</p>
           </div>
         </div>
@@ -1059,16 +944,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <AlertTriangle className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold">أصناف تحتاج إعادة طلب (منخفضة)</p>
+            <p className="text-xs text-slate-500 font-bold">أصناف تحتاج إعادة توريد (منخفضة)</p>
             <p className="text-lg font-black text-amber-700 font-mono">{toArabicNumerals(metrics.lowStockCount)} صنف</p>
           </div>
         </div>
       </div>
 
-      {/* SPLIT VIEW LAYOUT: Product Table (Left) + Dedicated Invoice Details & Cart (Right) */}
+      {/* SPLIT VIEW LAYOUT: Product Table (Left) + Dedicated Sales Invoice Details & Cart (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 no-print">
         
-        {/* MAIN SECTION: Product Search & Table (7-8 cols on Desktop, Left side in RTL) */}
+        {/* MAIN SECTION: Product Search & Table (8 cols on Desktop) */}
         <div className="lg:col-span-7 xl:col-span-8 space-y-4 lg:order-2">
           
           {/* Top Header Controls: Smart Search + Add Product */}
@@ -1095,10 +980,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   type="button"
                   onClick={openBatchAddModal}
                   className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  title="إدخال جماعي من ملفات إكسل"
+                  title="شاشة إدخال البيانات والتوريدات من إكسل مع تحديد الأسعار"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                  <span>إضافة دفعة (إكسل)</span>
+                  <span>إدخال مشتريات (إكسل)</span>
                 </button>
               </div>
             )}
@@ -1106,11 +991,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
           {/* Selected Product Quick Info Bar (Single Selection Indicator) */}
           {selectedProductId && (() => {
-            const selProd = products.find(p => String(p.id) === String(selectedProductId));
+            const selProd = catalogProducts.find(p => String(p.id) === String(selectedProductId));
             if (!selProd) return null;
             const inCart = Boolean(cartItems.some(item => String(item.product?.id) === String(selProd.id)));
-            const itemPrice = Number(selProd.price) || 0;
-            const totalStockValue = itemPrice * (selProd.stock || 0);
 
             return (
               <div className="bg-blue-50/90 border border-blue-200 p-3 rounded-xl flex items-center justify-between gap-3 text-xs animate-fadeIn">
@@ -1119,9 +1002,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     {selProd.code}
                   </span>
                   <span className="font-extrabold text-sm">{selProd.name}</span>
-                  <span className="text-slate-500 font-normal">| الرصيد: {toArabicNumerals(selProd.stock)} {selProd.unit || 'وحدة'}</span>
-                  <span className="text-emerald-700 font-bold">| السعر: {toArabicNumerals(itemPrice.toLocaleString())} ج.س</span>
-                  <span className="text-blue-900 font-bold">| إجمالي القيمة: {toArabicNumerals(totalStockValue.toLocaleString())} ج.س</span>
+                  <span className="text-slate-500 font-normal">| الرصيد المتاح: {toArabicNumerals(selProd.stock)} {selProd.unit || 'وحدة'}</span>
+                  <span className="text-emerald-700 font-bold">| التصنيف: {selProd.category || 'عام'}</span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
@@ -1134,7 +1016,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     }`}
                   >
                     <ShoppingCart className="w-3.5 h-3.5" />
-                    <span>{inCart ? 'موجود بأمر التسليم' : 'إضافة لأمر التسليم'}</span>
+                    <span>{inCart ? 'موجود بالفاتورة' : 'إضافة لفاتورة المبيعات'}</span>
                   </button>
                   {isGeneralManager && (
                     <>
@@ -1161,12 +1043,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             );
           })()}
 
-          {/* Product List Table with Strict Single Row Selection */}
+          {/* Product List Table: Price and Total columns are suppressed here as requested */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-3 bg-slate-900 text-white flex items-center justify-between">
               <span className="text-xs font-bold flex items-center gap-2">
                 <Boxes className="w-4 h-4 text-blue-400" />
-                <span>قائمة أصناف المخزن (انقر لتحديد الصنف، أو اضغط زر السلة لإضافته لأمر التسليم)</span>
+                <span>قائمة أصناف المبيعات (انقر لتحديد الصنف، أو اضغط زر السلة لإضافته لفاتورة المبيعات)</span>
               </span>
               <span className="text-[11px] font-mono text-slate-300">
                 {toArabicNumerals(filteredProducts.length)} صنف
@@ -1182,7 +1064,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3.5 w-28">التصنيف</th>
                     <th className="p-3.5 w-28 text-center bg-blue-50/70">الرصيد المتوفر</th>
                     <th className="p-3.5 w-28 text-center">حالة المخزون</th>
-                    <th className="p-3.5 w-24 text-center">أمر التسليم</th>
+                    <th className="p-3.5 w-28 text-center">فاتورة المبيعات</th>
                     {isGeneralManager && (
                       <th className="p-3.5 w-24 text-center">إجراءات</th>
                     )}
@@ -1193,26 +1075,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <tr>
                       <td colSpan={isGeneralManager ? 7 : 6} className="p-12 text-center text-slate-400">
                         <Boxes className="w-12 h-12 mx-auto mb-3 opacity-30 text-blue-600" />
-                        {warehouseProducts.length === 0 ? (
-                          <div className="space-y-2">
-                            <p className="font-black text-sm text-slate-800">المخزن فارغ حالياً (0 أصناف)</p>
-                            <p className="text-xs text-slate-500 max-w-md mx-auto">
-                              تم تصفير المخزن وعزله بنجاح، وهو مفعّل وجاهز لإضافة وتوريد الأصناف المستقلة بالكامل.
-                            </p>
-                            {isGeneralManager && (
-                              <button
-                                type="button"
-                                onClick={openAddModal}
-                                className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs inline-flex items-center gap-2 shadow-md cursor-pointer"
-                              >
-                                <Package className="w-4 h-4" />
-                                <span>إضافة أول صنف في هذا المخزن</span>
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <p className="font-bold text-sm text-slate-700">لا توجد أصناف مخزنية تطابق البحث</p>
-                        )}
+                        <p className="font-bold text-sm text-slate-700">لا توجد أصناف تطابق البحث</p>
                       </td>
                     </tr>
                   ) : (
@@ -1236,7 +1099,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               : 'hover:bg-slate-50'
                           }`}
                         >
-                          {/* Code / Serial */}
+                          {/* Code */}
                           <td className="p-3.5 font-mono font-black text-blue-900 text-xs sm:text-sm">
                             {toArabicNumerals(product.code)}
                           </td>
@@ -1245,93 +1108,90 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <td className="p-3.5">
                             <div className="flex items-center gap-2">
                               {inCart && (
-                                <span className="bg-emerald-600 text-white p-0.5 rounded-full shrink-0" title="موجود في أمر تسليم المخزن">
+                                <span className="bg-emerald-600 text-white p-0.5 rounded-full shrink-0" title="موجود في فاتورة المبيعات">
                                   <Check className="w-3 h-3" />
                                 </span>
                               )}
-                              <p className="font-extrabold text-slate-900 text-xs sm:text-sm leading-snug">
+                              <span className="font-bold text-slate-900 text-xs sm:text-sm">
                                 {product.name}
-                              </p>
+                              </span>
                             </div>
                           </td>
 
                           {/* Category */}
-                          <td className="p-3.5 text-slate-600 font-bold">
-                            <span className="px-2 py-0.5 bg-slate-100 rounded text-[11px]">
+                          <td className="p-3.5 text-slate-600 font-medium">
+                            <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md text-[11px] font-bold">
                               {product.category || 'عام'}
                             </span>
                           </td>
 
-                          {/* Item Quantity / Count */}
-                          <td className="p-3.5 text-center font-black font-mono text-sm sm:text-base bg-blue-50/30">
-                            <span className={isOutOfStock ? 'text-rose-600' : 'text-slate-900'}>
-                              {toArabicNumerals(product.stock)} <span className="text-[11px] font-sans text-slate-500">{product.unit || 'وحدة'}</span>
+                          {/* Available Stock */}
+                          <td className="p-3.5 text-center font-mono font-black text-xs sm:text-sm bg-blue-50/40">
+                            <span className={isOutOfStock ? 'text-rose-600 font-black' : isLowStock ? 'text-amber-700 font-black' : 'text-slate-900 font-black'}>
+                              {toArabicNumerals(product.stock)} {product.unit || 'وحدة'}
                             </span>
                           </td>
 
-                          {/* Stock Status Badge */}
+                          {/* Status Badge */}
                           <td className="p-3.5 text-center">
                             {isOutOfStock ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
-                                غير متوفر (نافد)
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200">
+                                نفد الرصيد
                               </span>
                             ) : isLowStock ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
-                                منخفض الرصيد
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
+                                رصيد منخفض
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                متوفر بالمخزن
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                متوفر للبيع
                               </span>
                             )}
                           </td>
 
-                          {/* Add to Cart Button */}
+                          {/* Cart Add Button */}
                           <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
+                              disabled={isOutOfStock}
                               onClick={() => handleToggleProductCart(product)}
-                              className={`p-1.5 rounded-lg transition cursor-pointer text-xs font-bold flex items-center justify-center mx-auto gap-1 ${
-                                inCart
-                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                  : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+                              className={`p-2 rounded-xl transition cursor-pointer flex items-center justify-center mx-auto ${
+                                isOutOfStock
+                                  ? 'opacity-30 cursor-not-allowed bg-slate-100 text-slate-400'
+                                  : inCart
+                                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200'
+                                  : 'bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white border border-blue-200'
                               }`}
-                              title={inCart ? 'إزالة من أمر التسليم' : 'إضافة إلى أمر تسليم المخزن'}
+                              title={inCart ? 'إزالة من فاتورة المبيعات' : 'إضافة إلى فاتورة المبيعات'}
                             >
-                              <ShoppingCart className="w-3.5 h-3.5" />
-                              <span className="hidden sm:inline">{inCart ? 'بالسلة' : '+ صرف'}</span>
+                              <ShoppingCart className="w-4 h-4" />
                             </button>
                           </td>
 
-                          {/* Actions: Edit & Delete (General Manager only) */}
+                          {/* Actions */}
                           {isGeneralManager && (
                             <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-1.5">
+                              <div className="flex items-center justify-center gap-1">
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openEditModal(product);
-                                  }}
-                                  className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition cursor-pointer border border-blue-200"
+                                  onClick={() => openEditModal(product)}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition"
                                   title="تعديل الصنف"
                                 >
-                                  <Edit2 className="w-4 h-4" />
+                                  <Edit2 className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteProductConfirm(product.id, product.name);
-                                  }}
-                                  className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer border border-rose-200"
+                                  onClick={() => handleDeleteProductConfirm(product.id, product.name)}
+                                  className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition"
                                   title="حذف الصنف"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             </td>
                           )}
+
                         </tr>
                       );
                     })
@@ -1343,19 +1203,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
         </div>
 
-        {/* RIGHT SIDE (In RTL): Dedicated Delivery Order Details & Cart Column */}
-        <div className="lg:col-span-5 xl:col-span-4 space-y-5 lg:order-1">
+        {/* SIDE SECTION: Sales Invoice & Cart Controls (4-5 cols on Desktop) */}
+        <div className="lg:col-span-5 xl:col-span-4 space-y-4 lg:order-1">
           
-          {/* CARD 1: Official Warehouse Delivery Order Details */}
+          {/* CARD 1: Sales Invoice Information */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            {/* Header */}
             <div className="p-4 bg-gradient-to-r from-blue-900 to-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-400" />
-                <h3 className="font-extrabold text-sm sm:text-base">بيانات أمر تسليم المخزن</h3>
+                <Receipt className="w-5 h-5 text-blue-400" />
+                <h3 className="font-extrabold text-sm sm:text-base">بيانات فاتورة المبيعات</h3>
               </div>
               <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-md font-black">
-                تسلسلي رسمي
+                فاتورة فورية
               </span>
             </div>
 
@@ -1365,7 +1224,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <FileText className="w-3.5 h-3.5 text-blue-600" />
-                    <span>رقم أمر تسليم المخزن التسلسلي (تلقائي ومحمي):</span>
+                    <span>رقم فاتورة المبيعات (تلقائي ومحمي):</span>
                   </span>
                   <span className="text-[10px] text-slate-500 font-bold">محمي</span>
                 </label>
@@ -1378,12 +1237,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 />
               </div>
 
-              {/* Recipient Name Field */}
+              {/* Recipient / Customer Name Field */}
               <div>
                 <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center justify-between">
                   <span className="flex items-center gap-1">
                     <UserIcon className="w-3.5 h-3.5 text-blue-600" />
-                    <span>اسم المستلم / الجهة المستلمة:</span>
+                    <span>اسم العميل / المستلم:</span>
                   </span>
                   <span className="text-[10px] text-rose-600 font-extrabold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">إجباري للطباعة</span>
                 </label>
@@ -1391,28 +1250,36 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   type="text"
                   value={recipientName}
                   onChange={(e) => setRecipientName(e.target.value)}
-                  placeholder="أدخل اسم المستلم أو الجهة المستلمة هنا..."
+                  placeholder="أدخل اسم العميل أو الجهة المستلمة هنا..."
                   className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-none transition shadow-2xs"
                 />
               </div>
 
-              {/* Totals Summary */}
-              <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs font-bold shadow-2xs">
+              {/* Totals Summary including Grand Total on demand */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2.5 text-xs font-bold shadow-2xs">
                 <div className="flex items-center justify-between text-slate-600">
-                  <span>إجمالي أصناف أمر التسليم:</span>
+                  <span>إجمالي بنود الفاتورة:</span>
                   <strong className="text-blue-800 font-mono text-sm">{toArabicNumerals(cartTotals.totalItems)} صنف</strong>
                 </div>
                 <div className="flex items-center justify-between text-slate-700">
-                  <span>إجمالي الكميات المسلمة:</span>
+                  <span>إجمالي الكميات المباعة:</span>
                   <span className="text-slate-900 font-mono font-black text-sm">
-                    {toArabicNumerals(cartTotals.totalQuantity)} قطعة / وحدة
+                    {toArabicNumerals(cartTotals.totalQuantity)} قطعة
                   </span>
                 </div>
+                {cartTotals.totalOrderValue > 0 && (
+                  <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-slate-900">
+                    <span className="font-extrabold text-blue-950">القيمة الكلية للفاتورة (الإجمالي):</span>
+                    <span className="text-emerald-700 font-mono font-black text-base">
+                      {toArabicNumerals(cartTotals.totalOrderValue.toLocaleString())} ج.س
+                    </span>
+                  </div>
+                )}
               </div>
 
               {!recipientName.trim() && cartItems.length > 0 && (
                 <p className="text-[11px] font-extrabold text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 text-center">
-                  ⚠️ يجب تعبئة اسم المستلم / الجهة المستلمة لتفعيل زر الطباعة
+                  ⚠️ يرجى كتابة اسم العميل / المستلم لتفعيل زر الطباعة
                 </p>
               )}
 
@@ -1421,21 +1288,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 type="button"
                 disabled={isSubmitting || cartItems.length === 0 || !recipientName.trim()}
                 onClick={handleCompleteInvoice}
-                className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-lg shadow-emerald-200/50 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-lg shadow-blue-200/50 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Printer className="w-4 h-4" />
-                <span>{isSubmitting ? 'جاري التوليد...' : 'إصدار وطباعة أمر تسليم مخزن (Ctrl + P)'}</span>
+                <span>{isSubmitting ? 'جاري التوليد...' : 'إصدار وطباعة فاتورة مبيعات (Ctrl + P)'}</span>
               </button>
             </div>
           </div>
 
-          {/* CARD 2: Dedicated Delivery Order Items List */}
+          {/* CARD 2: Sales Invoice Items List */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-            {/* Header */}
             <div className="p-3.5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShoppingCart className="w-4 h-4 text-emerald-400" />
-                <h3 className="font-extrabold text-xs sm:text-sm">سلة أمر التسليم (الأصناف المحددة)</h3>
+                <h3 className="font-extrabold text-xs sm:text-sm">سلة فاتورة المبيعات</h3>
                 <span className="bg-blue-600/60 text-blue-200 px-2 py-0.5 rounded-full text-[11px] font-mono font-bold">
                   {toArabicNumerals(cartItems.length)}
                 </span>
@@ -1452,7 +1318,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               )}
             </div>
 
-            {/* Error Message */}
             {formError && (
               <div className="p-3 bg-rose-50 text-rose-800 text-xs font-bold border-b border-rose-200 flex items-center gap-1.5">
                 <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
@@ -1468,10 +1333,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <ShoppingCart className="w-7 h-7 text-slate-300" />
                   </div>
                   <p className="font-extrabold text-xs text-slate-700">
-                    سلة أمر التسليم فارغة حالياً
+                    سلة فاتورة المبيعات فارغة حالياً
                   </p>
                   <p className="text-[11px] text-slate-400 max-w-xs leading-relaxed">
-                    اضغط مباشرة على أي صنف من قائمة الأصناف لإضافته فوراً إلى أمر التسليم.
+                    اضغط مباشرة على أي صنف من قائمة الأصناف لإضافته فوراً إلى فاتورة المبيعات.
                   </p>
                 </div>
               ) : (
@@ -1494,7 +1359,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <button
                           onClick={() => handleRemoveFromCart(product.id)}
                           className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                          title="حذف من أمر التسليم"
+                          title="حذف من الفاتورة"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1502,7 +1367,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                       {/* Quantity Input */}
                       <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
-                        <span className="text-[11px] font-bold text-slate-600">عدد الوحدات المصروفة:</span>
+                        <span className="text-[11px] font-bold text-slate-600">الكمية المباعة:</span>
                         <div className="flex items-center gap-1.5">
                           <button
                             type="button"
@@ -1555,7 +1420,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
       </div>
 
-      {/* SINGLE ITEM ADD / EDIT PRODUCT MODAL */}
+      {/* SINGLE ITEM ADD / EDIT PRODUCT MODAL (Data entry screen includes Unit Price, NO Total column here) */}
       {isModalOpen && (
         <div className="modal-overlay-stable">
           <div className="modal-content-stable bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
@@ -1565,12 +1430,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 {editingProduct ? (
                   <>
                     <Edit2 className="w-5 h-5 text-blue-600" />
-                    <span>تعديل بيانات الصنف المخزني</span>
+                    <span>تعديل بيانات صنف المبيعات</span>
                   </>
                 ) : (
                   <>
                     <Plus className="w-5 h-5 text-emerald-600" />
-                    <span>إضافة صنف مخزني جديد</span>
+                    <span>إدخال صنف مبيعات جديد (عملية شراء/توريد)</span>
                   </>
                 )}
               </h3>
@@ -1612,30 +1477,68 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="مثال: كابل شبكة كات 6 مصفح..."
+                  placeholder="مثال: شواية فراخ دوار..."
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-bold focus:border-blue-600 focus:outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد الافتتاحي بالمخزن *</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  required
-                  value={stock}
-                  onChange={(e) => setStock(e.target.value)}
-                  onBlur={() => {
-                    if (!stock.trim() || isNaN(parseInt(stock, 10)) || parseInt(stock, 10) < 0) {
-                      setStock('0');
-                    }
-                  }}
-                  placeholder="0"
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد / الكمية المسجلة *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    required
+                    value={stock}
+                    onChange={(e) => setStock(e.target.value)}
+                    placeholder="1"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    سعر الوحدة (ج.س) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    required
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    placeholder="0"
+                    title="حدد سعر الوحدة أثناء الإدخال"
+                    className="w-full px-3 py-2 text-xs border border-blue-400 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none bg-blue-50/30 text-blue-950"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">التصنيف</label>
+                  <input
+                    type="text"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    placeholder="عام"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-bold focus:border-blue-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الوحدة</label>
+                  <input
+                    type="text"
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value)}
+                    placeholder="وحدة"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-bold focus:border-blue-600 focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
@@ -1649,12 +1552,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className={`px-6 py-2.5 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer ${
-                    editingProduct ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'
-                  }`}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer disabled:opacity-50"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>{editingProduct ? 'تحديث بيانات الصنف' : 'حفظ وإضافة الصنف'}</span>
+                  {isSubmitting ? 'جاري الحفظ...' : editingProduct ? 'حفظ التعديلات' : 'إضافة الصنف'}
                 </button>
               </div>
             </form>
@@ -1663,27 +1563,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
-      {/* AUTOMATIC DELIVERY ORDER PRINT PREVIEW MODAL */}
+      {/* SALES INVOICE PRINT MODAL */}
       <DeliveryOrderModal
-        movement={null}
-        items={activeDeliveryItems || undefined}
+        items={activeDeliveryItems || []}
         orderNumber={activeDeliveryOrderNo}
-        recipientName={activeRecipientName}
-        warehouseName={activeWarehouse ? WAREHOUSES[activeWarehouse]?.name : undefined}
         onClose={() => {
           setActiveDeliveryItems(null);
           setActiveDeliveryOrderNo('');
-          setActiveRecipientName('');
         }}
       />
 
-      {/* OFFICIAL INVENTORY COUNT & STOCK AUDIT REPORT MODAL */}
+      {/* INVENTORY REPORT MODAL */}
       <InventoryReportModal
         isOpen={isInventoryReportOpen}
         onClose={() => setIsInventoryReportOpen(false)}
-        products={products}
-        warehouseName={whConfig ? whConfig.name : (activeWarehouse ? WAREHOUSES[activeWarehouse]?.name : 'المخزن العام')}
-        operatorName={currentUser?.name || 'أمين المخزن المعتمد'}
+        products={catalogProducts}
+        warehouseName="نظام المبيعات المباشر"
+        operatorName={currentUser?.name || 'مسؤول المبيعات المعتمد'}
       />
 
     </div>

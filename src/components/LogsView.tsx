@@ -241,7 +241,7 @@ export const LogsView: React.FC<LogsViewProps> = ({
                   <th className="p-3.5">البيان / السبب</th>
                   <th className="p-3.5">رقم المستند</th>
                   <th className="p-3.5">مسؤول المخزن</th>
-                  <th className="p-3.5 text-center">أمر تسليم المخزن</th>
+                  <th className="p-3.5 text-center">فاتورة مبيعات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -249,7 +249,7 @@ export const LogsView: React.FC<LogsViewProps> = ({
                   <tr>
                     <td colSpan={9} className="p-12 text-center text-slate-400">
                       <Boxes className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                      <p className="font-bold text-sm text-slate-600">لا توجد حركات مخزنية مسجلة تطابق البحث</p>
+                      <p className="font-bold text-sm text-slate-600">لا توجد حركات مسجلة تطابق البحث</p>
                     </td>
                   </tr>
                 ) : (
@@ -285,7 +285,7 @@ export const LogsView: React.FC<LogsViewProps> = ({
                             ) : (
                               <>
                                 <ArrowUpLeft className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                                <span>صرف مخزني (-)</span>
+                                <span>فاتورة مبيعات (-)</span>
                               </>
                             )}
                           </span>
@@ -313,7 +313,7 @@ export const LogsView: React.FC<LogsViewProps> = ({
 
                         {/* Reason */}
                         <td className="p-3.5 font-bold text-slate-800 max-w-xs">
-                          {mvt.reason || 'إجراء مخزني'}
+                          {mvt.reason || 'إجراء مبيعات'}
                         </td>
 
                         {/* Document Reference */}
@@ -328,15 +328,15 @@ export const LogsView: React.FC<LogsViewProps> = ({
                           </span>
                         </td>
 
-                        {/* Delivery Order Print Action */}
+                        {/* Sales Invoice Print Action */}
                         <td className="p-3.5 text-center">
                           <button
                             onClick={() => handleOpenDeliveryOrder(mvt)}
                             className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-200 rounded-lg text-xs font-bold transition flex items-center gap-1 mx-auto cursor-pointer shadow-xs"
-                            title="معاينة وطباعة أمر تسليم المخزن (إذن الصرف)"
+                            title="معاينة وطباعة فاتورة المبيعات"
                           >
                             <Printer className="w-3.5 h-3.5" />
-                            <span>أمر التسليم</span>
+                            <span>فاتورة مبيعات</span>
                           </button>
                         </td>
 

@@ -124,9 +124,9 @@ export const InventoryReportModal: React.FC<InventoryReportModalProps> = ({
               <ClipboardList className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-base font-black text-black">كشف جرد وتفقد المخزون الفعلي</h3>
+              <h3 className="text-base font-black text-black">كشف جرد وتفقد أصناف المبيعات</h3>
               <p className="text-[11px] text-slate-600 font-bold">
-                تقرير رسمي لجرد ومطابقة أرصدة المستودع معتمدة للطباعة على ورق A4
+                تقرير رسمي لجرد ومطابقة أرصدة المبيعات معتمدة للطباعة المباشرة على ورق A4
               </p>
             </div>
           </div>
@@ -135,21 +135,11 @@ export const InventoryReportModal: React.FC<InventoryReportModalProps> = ({
             <button
               type="button"
               onClick={handlePrint}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md transition cursor-pointer"
-              title="طباعة كشف الجرد عبر محرك النظام (Ctrl + P)"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md transition cursor-pointer"
+              title="طباعة كشف الجرد عبر الطابعة المباشرة (Ctrl + P)"
             >
               <Printer className="w-4 h-4" />
               <span>طباعة كشف الجرد (Ctrl + P)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleExportCSV}
-              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-              title="تصدير بيانات الجرد الحالية إلى ملف إكسل CSV"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-              <span>تصدير Excel</span>
             </button>
 
             <button
@@ -227,9 +217,9 @@ export const InventoryReportModal: React.FC<InventoryReportModalProps> = ({
             <div className="space-y-1">
               <h1 className="text-2xl font-black text-black font-['Tajawal'] tracking-tight">شركة NOSSER - أم درمان</h1>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-black text-black font-['Tajawal']">إدارة المخازن والمستودعات</h2>
+                <h2 className="text-sm font-black text-black font-['Tajawal']">إدارة المبيعات والأصناف</h2>
                 <span className="text-xs font-black px-2 py-0.5 border border-black rounded-md bg-slate-100 font-['Tajawal']">
-                  [{warehouseName}]
+                  [نظام المبيعات المباشر]
                 </span>
               </div>
               <p className="text-xs font-black text-black font-mono flex items-center gap-1">
@@ -241,7 +231,7 @@ export const InventoryReportModal: React.FC<InventoryReportModalProps> = ({
             </div>
             
             <div className="text-center bg-white text-black border-2 border-black px-7 py-2.5 rounded-xl shadow-xs">
-              <h2 className="text-xl font-black tracking-wide font-['Tajawal'] text-black">كشف جرد المخزون الفعلي</h2>
+              <h2 className="text-xl font-black tracking-wide font-['Tajawal'] text-black">كشف جرد الأصناف والمبيعات</h2>
               <p className="text-xs font-mono text-black font-black mt-1">
                 رقم الكشف: {toArabicNumerals(reportCode)}
               </p>

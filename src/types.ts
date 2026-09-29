@@ -1,4 +1,4 @@
-export type UserRole = 'GENERAL_MANAGER' | 'WAREHOUSE_MANAGER';
+export type UserRole = 'GENERAL_MANAGER' | 'SALES_MANAGER' | 'WAREHOUSE_MANAGER';
 
 export type WarehouseId = 'EASTERN' | 'WESTERN' | 'AUXILIARY';
 
@@ -22,10 +22,10 @@ export interface WarehouseConfig {
 export const WAREHOUSES: Record<WarehouseId, WarehouseConfig> = {
   EASTERN: {
     id: 'EASTERN',
-    name: 'المخزن الشرقي',
-    shortCode: 'شرقي',
-    tagline: 'المستودع الرئيسي - القطاع الشرقي',
-    description: 'إدارة مخزون القطاع الشرقي وتجهيزات المعدات المركزية وحركة السحب والتسليم',
+    name: 'نظام المبيعات المباشر',
+    shortCode: 'مبيعات',
+    tagline: 'نظام المبيعات المباشر - شركة NOSSER',
+    description: 'إدارة أصناف المبيعات، الفواتير الفورية، وحركات الصرف المباشر للعملاء',
     themeColor: 'blue',
     gradient: 'from-blue-700 via-indigo-800 to-slate-900',
     badgeBg: 'bg-blue-600',
@@ -40,8 +40,8 @@ export const WAREHOUSES: Record<WarehouseId, WarehouseConfig> = {
     id: 'WESTERN',
     name: 'المخزن الغربي',
     shortCode: 'غربي',
-    tagline: 'المستودع الإقليمي - القطاع الغربي (أمدرمان)',
-    description: 'إدارة مخزون القطاع الغربي ومعدات التوزيع والتشغيل الميداني وحركة السحب',
+    tagline: 'المستودع الإقليمي',
+    description: 'إدارة مخزون القطاع الغربي',
     themeColor: 'emerald',
     gradient: 'from-emerald-700 via-teal-800 to-slate-900',
     badgeBg: 'bg-emerald-600',
@@ -56,8 +56,8 @@ export const WAREHOUSES: Record<WarehouseId, WarehouseConfig> = {
     id: 'AUXILIARY',
     name: 'المخزن الإضافي',
     shortCode: 'إضافي',
-    tagline: 'المستودع الاحتياطي - مخزن الطوارئ والفائض',
-    description: 'حفظ المواد الاحتياطية وقطع الغيار والتجهيزات الإضافية ومتابعة الصرف',
+    tagline: 'المستودع الاحتياطي',
+    description: 'حفظ المواد الاحتياطية',
     themeColor: 'amber',
     gradient: 'from-amber-700 via-orange-800 to-slate-900',
     badgeBg: 'bg-amber-600',
@@ -89,10 +89,10 @@ export interface Product {
   minStock: number;
   unit: string;
   warehouseId?: WarehouseId;
-  warehouse_id?: WarehouseId; // للتوافق المباشر مع استعلامات SQL وقواعد البيانات
+  warehouse_id?: WarehouseId;
   store_id?: string;
   warehouseName?: string;
-  price?: number; // للتوافق العكسي فقط - تم إلغاء القيود السعرية والمالية
+  price?: number; // سعر الوحدة (يحدد عند الإدخال/الشراء)
   description?: string;
   imageUrl?: string;
   updatedAt: string;
@@ -109,6 +109,8 @@ export interface StockMovement {
   warehouseName?: string;
   type: 'IN' | 'OUT' | 'ADJUSTMENT'; // توريد / صرف / تعديل جرد
   quantity: number;
+  unitPrice?: number;
+  totalPrice?: number;
   previousStock: number;
   newStock: number;
   reason: string;

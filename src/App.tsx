@@ -4,7 +4,6 @@ import { InventoryView } from './components/InventoryView';
 import { UsersView } from './components/UsersView';
 import { LogsView } from './components/LogsView';
 import { ForgotPasswordModal } from './components/ForgotPasswordModal';
-import { WarehouseSelectorScreen } from './components/WarehouseSelectorScreen';
 import { INITIAL_PRODUCTS } from './lib/seedData';
 import {
   Boxes,
@@ -14,14 +13,14 @@ import {
   Lock,
   UserCheck,
   ShieldCheck,
-  Warehouse,
   AlertTriangle,
   ArrowRight,
   KeyRound,
   Eye,
   EyeOff,
   LogOut,
-  PackageCheck
+  Receipt,
+  ShoppingBag
 } from 'lucide-react';
 
 export default function App() {
@@ -34,17 +33,6 @@ export default function App() {
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-
-  // Active Warehouse State & Post-Login Selector
-  const [selectedWarehouse, setSelectedWarehouse] = useState<WarehouseId | null>(() => {
-    try {
-      const saved = localStorage.getItem('nosser_active_warehouse');
-      if (saved && ['EASTERN', 'WESTERN', 'AUXILIARY'].includes(saved)) {
-        return saved as WarehouseId;
-      }
-    } catch {}
-    return null;
-  });
 
   // Guarantee password is empty on mount and session resume
   useEffect(() => {
@@ -59,6 +47,7 @@ export default function App() {
   // Active View Tab Navigation
   const [activeTab, setActiveTab] = useState<'INVENTORY' | 'LOGS' | 'USERS'>('INVENTORY');
   const [previousTab, setPreviousTab] = useState<'INVENTORY' | 'LOGS' | 'USERS'>('INVENTORY');
+  const selectedWarehouse: WarehouseId = 'EASTERN';
 
   const handleTabChange = (newTab: 'INVENTORY' | 'LOGS' | 'USERS') => {
     if (newTab !== activeTab) {
@@ -88,35 +77,16 @@ export default function App() {
     }
   };
 
-  // Application State
+  // Direct Unified Sales Catalog
   const DEFAULT_PRODUCTS: Product[] = INITIAL_PRODUCTS.map(p => ({
     ...p,
-    warehouseId: 'EASTERN' as const,
-    warehouseName: 'المخزن الشرقي',
+    price: Number(p.price) || 0,
   }));
 
   const [products, setProducts] = useState<Product[]>(() => {
     try {
-      // Version 4.0.0 cleanup: clean previous cross-warehouse cache
-      const v4Clean = localStorage.getItem('nosser_v4_migrated');
-      if (!v4Clean) {
-        localStorage.removeItem('nasser_warehouse_products_v5');
-        localStorage.removeItem('nasser_warehouse_products_v4');
-        localStorage.removeItem('nasser_warehouse_products_v3');
-        localStorage.removeItem('nasser_warehouse_movements_v5');
-        localStorage.setItem('nosser_v4_migrated', 'true');
-        const easternInit = DEFAULT_PRODUCTS;
-        localStorage.setItem('nosser_products_EASTERN', JSON.stringify(easternInit));
-        localStorage.setItem('nosser_products_WESTERN', JSON.stringify([]));
-        localStorage.setItem('nosser_products_AUXILIARY', JSON.stringify([]));
-        return easternInit;
-      }
-      const active = localStorage.getItem('nosser_active_warehouse');
-      if (active && ['EASTERN', 'WESTERN', 'AUXILIARY'].includes(active)) {
-        const saved = localStorage.getItem(`nosser_products_${active}`);
-        if (saved) return JSON.parse(saved);
-        if (active !== 'EASTERN') return [];
-      }
+      const saved = localStorage.getItem('nosser_sales_products');
+      if (saved) return JSON.parse(saved);
       const savedEastern = localStorage.getItem('nosser_products_EASTERN');
       if (savedEastern) return JSON.parse(savedEastern);
     } catch {
@@ -127,12 +97,10 @@ export default function App() {
 
   const [movements, setMovements] = useState<StockMovement[]>(() => {
     try {
+      const saved = localStorage.getItem('nosser_sales_movements');
+      if (saved) return JSON.parse(saved);
       const savedV5 = localStorage.getItem('nasser_warehouse_movements_v5');
       if (savedV5) return JSON.parse(savedV5);
-      const savedV2 = localStorage.getItem('nasser_warehouse_movements_v2');
-      if (savedV2) return JSON.parse(savedV2);
-      const savedV1 = localStorage.getItem('nasser_warehouse_movements_v1');
-      if (savedV1) return JSON.parse(savedV1);
       return [];
     } catch {
       return [];
@@ -147,11 +115,9 @@ export default function App() {
   const [targetPasswordUsername, setTargetPasswordUsername] = useState('');
 
   // Data Sync Handlers
-  const fetchProducts = async (targetWh?: WarehouseId | null) => {
-    const wh = targetWh !== undefined ? targetWh : selectedWarehouse;
+  const fetchProducts = async () => {
     try {
-      const url = wh ? `/api/products?warehouse=${wh}` : '/api/products';
-      const res = await safeJsonFetch(url);
+      const res = await safeJsonFetch('/api/products');
       if (res.isJson && res.data && res.data.success && Array.isArray(res.data.products)) {
         // Standardize codes and ensure unique string IDs
         const normalized = res.data.products.map((p: Product, idx: number) => {
@@ -165,49 +131,38 @@ export default function App() {
             ...p,
             id: validId,
             code: validCode,
-            warehouseId: p.warehouseId || (wh || 'EASTERN'),
-            warehouseName: p.warehouseName || (wh ? WAREHOUSES[wh]?.name : 'المخزن الشرقي'),
+            price: Math.max(0, Number(p.price) || 0),
           };
         });
         setProducts(normalized);
-        if (wh) {
-          try {
-            localStorage.setItem(`nosser_products_${wh}`, JSON.stringify(normalized));
-          } catch (e) {}
-        }
-      } else if (wh) {
-        const saved = localStorage.getItem(`nosser_products_${wh}`);
+        try {
+          localStorage.setItem('nosser_sales_products', JSON.stringify(normalized));
+        } catch (e) {}
+      } else {
+        const saved = localStorage.getItem('nosser_sales_products');
         if (saved) setProducts(JSON.parse(saved));
       }
     } catch (e) {
-      if (wh) {
-        const saved = localStorage.getItem(`nosser_products_${wh}`);
-        if (saved) setProducts(JSON.parse(saved));
-      }
+      const saved = localStorage.getItem('nosser_sales_products');
+      if (saved) setProducts(JSON.parse(saved));
     }
   };
 
-  const fetchMovements = async (targetWh?: WarehouseId | null) => {
-    const wh = targetWh !== undefined ? targetWh : selectedWarehouse;
+  const fetchMovements = async () => {
     try {
-      const url = wh ? `/api/movements?warehouse=${wh}` : '/api/movements';
-      const res = await safeJsonFetch(url);
+      const res = await safeJsonFetch('/api/movements');
       if (res.isJson && res.data && res.data.success && Array.isArray(res.data.movements)) {
         setMovements(res.data.movements);
-        if (wh) {
-          try {
-            localStorage.setItem(`nosser_movements_${wh}`, JSON.stringify(res.data.movements));
-          } catch (e) {}
-        }
-      } else if (wh) {
-        const saved = localStorage.getItem(`nosser_movements_${wh}`);
+        try {
+          localStorage.setItem('nosser_sales_movements', JSON.stringify(res.data.movements));
+        } catch (e) {}
+      } else {
+        const saved = localStorage.getItem('nosser_sales_movements');
         if (saved) setMovements(JSON.parse(saved));
       }
     } catch (e) {
-      if (wh) {
-        const saved = localStorage.getItem(`nosser_movements_${wh}`);
-        if (saved) setMovements(JSON.parse(saved));
-      }
+      const saved = localStorage.getItem('nosser_sales_movements');
+      if (saved) setMovements(JSON.parse(saved));
     }
   };
 
@@ -234,11 +189,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchProducts(selectedWarehouse);
-    fetchMovements(selectedWarehouse);
+    fetchProducts();
+    fetchMovements();
     fetchUsers();
     fetchLogs();
-  }, [selectedWarehouse]);
+  }, []);
 
   // Global Ctrl+P & Cmd+P Keyboard Shortcut Listener for Internal Native Printing
   useEffect(() => {
@@ -317,7 +272,6 @@ export default function App() {
     setCurrentUser(null);
     setLoginPassword('');
     setShowLoginPassword(false);
-    setSelectedWarehouse(null);
     try {
       localStorage.removeItem('nosser_active_warehouse');
     } catch {}
@@ -691,7 +645,6 @@ export default function App() {
     }
 
     // Local fallback
-    const prefixLetter = currentWh === 'WESTERN' ? 'W' : currentWh === 'AUXILIARY' ? 'A' : 'E';
     let maxNum = 100;
     products.forEach(p => {
       const match = p.code.match(/^(?:NOSSER-|NASSER-)?(?:[EWA])?(\d+)$/i) || p.code.match(/\d+/);
@@ -707,7 +660,7 @@ export default function App() {
     items.forEach((item, index) => {
       if (!item.name || !item.name.trim()) return;
       maxNum += 1;
-      let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NOSSER-${prefixLetter}${maxNum}`;
+      let finalCode = (item.code && item.code.trim()) ? item.code.trim() : `NOSSER-${maxNum}`;
       if (!finalCode.startsWith('NOSSER-')) {
         finalCode = `NOSSER-${finalCode}`;
       }
@@ -861,14 +814,14 @@ export default function App() {
           
           {/* Logo Header */}
           <div className="text-center space-y-2">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-blue-500 mx-auto flex items-center justify-center shadow-lg shadow-blue-900/50">
-              <Warehouse className="w-9 h-9 text-white" />
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-indigo-600 mx-auto flex items-center justify-center shadow-lg shadow-blue-900/50">
+              <ShoppingBag className="w-9 h-9 text-white" />
             </div>
             <h1 className="text-2xl font-black tracking-wide text-white font-['Tajawal'] flex items-center justify-center gap-2">
-              <span>شركة <span className="text-blue-400">NASSER</span></span>
-              <span className="text-[11px] font-mono bg-blue-600/30 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">v3.0.1</span>
+              <span>شركة <span className="text-blue-400">NOSSER</span></span>
+              <span className="text-[11px] font-mono bg-blue-600/30 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">v4.0.1</span>
             </h1>
-            <p className="text-xs text-slate-300 font-bold">نظام إدارة المخازن والمخزون والتوريد والتصريف - الإصدار (v3.0.1)</p>
+            <p className="text-xs text-slate-300 font-bold">نظام المبيعات المباشر وإصدار الفواتير - الإصدار (v4.0.1)</p>
           </div>
 
           {/* Error Banner */}
@@ -914,9 +867,9 @@ export default function App() {
                     : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
                 }`}
               >
-                <Warehouse className="w-4 h-4 text-emerald-400 shrink-0" />
+                <ShoppingBag className="w-4 h-4 text-emerald-400 shrink-0" />
                 <div>
-                  <span className="font-bold block text-white text-xs">أمين المخزن</span>
+                  <span className="font-bold block text-white text-xs">مسؤول المبيعات</span>
                   <span className="text-[10px] text-slate-400 font-mono">حساب @wh_manager</span>
                 </div>
               </button>
@@ -983,14 +936,14 @@ export default function App() {
               className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-900/50 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <Lock className="w-4 h-4" />
-              <span>{isLoggingIn ? 'جاري التحقق والتسجيل...' : 'تسجيل الدخول للنظام المخزني'}</span>
+              <span>{isLoggingIn ? 'جاري التحقق والتسجيل...' : 'تسجيل الدخول لنظام المبيعات المباشر'}</span>
             </button>
           </form>
 
           {/* Footer Info */}
           <div className="pt-4 border-t border-slate-800 text-center text-[10px] text-slate-400 flex items-center justify-between">
-            <span>شركة NASSER - نظام إدارة المخازن 100% Offline</span>
-            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v3.0.1</span>
+            <span>شركة NOSSER - نظام المبيعات المباشر 100% Offline</span>
+            <span className="bg-slate-800 text-blue-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold border border-slate-700">v4.0.1</span>
           </div>
 
         </div>
@@ -1012,26 +965,7 @@ export default function App() {
     );
   }
 
-  // POST-LOGIN WAREHOUSE SELECTION SCREEN
-  // Automatically displayed immediately after login to choose warehouse
-  if (!selectedWarehouse) {
-    return (
-      <WarehouseSelectorScreen
-        currentUser={currentUser}
-        products={products}
-        selectedWarehouse={null}
-        canDismiss={false}
-        onSelectWarehouse={(whId) => {
-          setSelectedWarehouse(whId);
-          try {
-            localStorage.setItem('nosser_active_warehouse', whId);
-          } catch {}
-        }}
-      />
-    );
-  }
-
-  // MAIN WAREHOUSE SYSTEM LAYOUT
+  // MAIN DIRECT SALES SYSTEM LAYOUT
   return (
     <div className="min-h-screen bg-[#0F172A] text-slate-200 font-['Cairo',sans-serif] flex flex-row overflow-x-hidden select-none" dir="rtl">
       
@@ -1041,8 +975,8 @@ export default function App() {
         {/* Brand Header */}
         <div className="p-6 border-b border-slate-700">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-blue-500 flex items-center justify-center text-white font-extrabold shadow-lg shadow-blue-900/40">
-              <Warehouse className="w-6 h-6 text-white" />
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-extrabold shadow-lg shadow-blue-900/40">
+              <ShoppingBag className="w-6 h-6 text-white" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
@@ -1050,47 +984,35 @@ export default function App() {
                   شركة <span className="text-blue-400">NOSSER</span>
                 </h1>
                 <span className="text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 px-1.5 py-0.2 rounded-md">
-                  v4.0.0
+                  v4.0.1
                 </span>
               </div>
               <p className="text-[10px] text-blue-400 mt-0.5 font-bold tracking-widest uppercase">
-                نظام إدارة المخازن والمخزون
+                نظام المبيعات المباشر
               </p>
             </div>
           </div>
         </div>
 
-        {/* Dedicated Active Warehouse Card in Sidebar */}
+        {/* Dedicated System Card in Sidebar */}
         <div className="px-4 pt-4 pb-2">
-          <div className={`p-3.5 rounded-2xl border text-right space-y-2 transition-all shadow-md ${
-            selectedWarehouse === 'EASTERN'
-              ? 'bg-gradient-to-br from-blue-950/70 to-slate-900 border-blue-600/40 text-blue-200'
-              : selectedWarehouse === 'WESTERN'
-              ? 'bg-gradient-to-br from-emerald-950/70 to-slate-900 border-emerald-600/40 text-emerald-200'
-              : 'bg-gradient-to-br from-amber-950/70 to-slate-900 border-amber-600/40 text-amber-200'
-          }`}>
+          <div className="p-3.5 rounded-2xl border text-right space-y-2 transition-all shadow-md bg-gradient-to-br from-blue-950/70 to-slate-900 border-blue-600/40 text-blue-200">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
-                <Building2 className="w-3.5 h-3.5 text-slate-300" />
-                المخزن النشط
+                <Receipt className="w-3.5 h-3.5 text-blue-400" />
+                حالة النظام
               </span>
-              <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
-                selectedWarehouse === 'EASTERN'
-                  ? 'bg-blue-500/25 text-blue-300 border-blue-400/30'
-                  : selectedWarehouse === 'WESTERN'
-                  ? 'bg-emerald-500/25 text-emerald-300 border-emerald-400/30'
-                  : 'bg-amber-500/25 text-amber-300 border-amber-400/30'
-              }`}>
-                كود: {WAREHOUSES[selectedWarehouse]?.shortCode}
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-md border bg-emerald-500/25 text-emerald-300 border-emerald-400/30">
+                مبيعات مباشرة
               </span>
             </div>
 
             <div>
               <h3 className="text-sm font-black text-white font-['Tajawal'] tracking-tight">
-                {WAREHOUSES[selectedWarehouse]?.name}
+                إدارة المبيعات وإصدار الفواتير
               </h3>
               <p className="text-[11px] text-slate-300 mt-0.5 font-medium line-clamp-1">
-                {WAREHOUSES[selectedWarehouse]?.tagline}
+                نظام بيع فوري وحفظ داخلي مع طباعة مباشرة
               </p>
             </div>
           </div>
@@ -1106,8 +1028,8 @@ export default function App() {
                 : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
             }`}
           >
-            <Boxes className="w-5 h-5 ml-3 text-blue-400 shrink-0" />
-            <span>إدارة المخزن والأصناف</span>
+            <ShoppingBag className="w-5 h-5 ml-3 text-blue-400 shrink-0" />
+            <span>إدارة المبيعات والأصناف</span>
           </button>
 
           <button
@@ -1118,8 +1040,8 @@ export default function App() {
                 : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
             }`}
           >
-            <FileText className="w-5 h-5 ml-3 text-emerald-400 shrink-0" />
-            <span>حركات التوريد والتصريف والسجل</span>
+            <Receipt className="w-5 h-5 ml-3 text-emerald-400 shrink-0" />
+            <span>حركات المبيعات وفواتير البيع</span>
           </button>
 
           {currentUser.role === 'GENERAL_MANAGER' && (
@@ -1132,7 +1054,7 @@ export default function App() {
               }`}
             >
               <Users className="w-5 h-5 ml-3 text-purple-400 shrink-0" />
-              <span>إدارة أمناء وحسابات المخزن</span>
+              <span>إدارة مسؤولي المبيعات والحسابات</span>
             </button>
           )}
         </nav>
@@ -1198,33 +1120,25 @@ export default function App() {
               </button>
             )}
             <div className="bg-slate-900 text-white p-2 rounded-xl shadow-xs">
-              <Warehouse className="w-5 h-5 text-blue-400" />
+              <ShoppingBag className="w-5 h-5 text-blue-400" />
             </div>
             <div>
               <h2 className="text-sm font-extrabold text-slate-900 leading-tight">
-                {activeTab === 'INVENTORY' && '📦 إدارة أصناف المخزون والتوريد والتصريف'}
-                {activeTab === 'LOGS' && '📜 سجل حركة التوريد والتصريف والمراجعة'}
-                {activeTab === 'USERS' && '👥 إدارة أمناء المخازن وحسابات المستخدمين'}
+                {activeTab === 'INVENTORY' && '🏷️ إدارة الأصناف والمبيعات المباشرة'}
+                {activeTab === 'LOGS' && '🧾 سجل حركات المبيعات وفواتير البيع'}
+                {activeTab === 'USERS' && '👥 إدارة مسؤولي المبيعات وحسابات النظام'}
               </h2>
               <p className="text-[11px] text-slate-500 font-semibold">
-                شركة NASSER - نظام إدارة المخازن والمخزون
+                شركة NOSSER - نظام المبيعات المباشر
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* Active Warehouse Indicator Pill */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-xs ${
-              selectedWarehouse === 'EASTERN'
-                ? 'bg-blue-50 text-blue-900 border-blue-200'
-                : selectedWarehouse === 'WESTERN'
-                ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
-                : 'bg-amber-50 text-amber-900 border-amber-200'
-            }`}>
-              <Building2 className={`w-4 h-4 ${
-                selectedWarehouse === 'EASTERN' ? 'text-blue-600' : selectedWarehouse === 'WESTERN' ? 'text-emerald-600' : 'text-amber-600'
-              }`} />
-              <span>{WAREHOUSES[selectedWarehouse]?.name}</span>
+            {/* Direct Sales Indicator Pill */}
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-900 text-xs font-bold shadow-xs">
+              <Receipt className="w-4 h-4 text-blue-600" />
+              <span>نظام المبيعات المباشر</span>
             </div>
 
             {/* Active User Badge */}
@@ -1238,7 +1152,7 @@ export default function App() {
                   {currentUser.role === 'GENERAL_MANAGER' ? (
                     <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded font-bold">مدير عام</span>
                   ) : (
-                    <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded font-bold">أمين مخزن</span>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded font-bold">مسؤول مبيعات</span>
                   )}
                 </p>
               </div>
@@ -1311,12 +1225,12 @@ export default function App() {
 
         {/* Footer Bar */}
         <footer className="h-9 bg-slate-100 border-t border-slate-200 px-6 sm:px-8 flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-widest no-print mt-auto">
-          <div>الموقع: أمدرمان | {WAREHOUSES[selectedWarehouse]?.name}</div>
+          <div>الموقع: أمدرمان | شركة NOSSER - إدارة المبيعات</div>
           <div className="flex gap-6 items-center">
-            <span>تحديث أوفلاين تلقائي</span>
+            <span>تحديث أوفلاين فوري</span>
             <span className="text-emerald-600 font-extrabold flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
-              قاعدة البيانات المحلية متصلة (100% Warehouse Offline Mode)
+              قاعدة البيانات الداخلية متصلة (100% Offline Mode)
             </span>
           </div>
         </footer>

@@ -1292,12 +1292,12 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     data = self._read_json_body()
                     items = data.get('items', [])
                     ref_no = data.get('referenceNo', '1')
-                    reason_str = data.get('reason', 'أمر تسليم مخزن')
-                    op_name = data.get('operatorName') or 'أمين المخزن'
+                    reason_str = data.get('reason', 'فاتورة مبيعات')
+                    op_name = data.get('operatorName') or 'مسؤول المبيعات'
                     now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
 
                     if not items:
-                        return self._send_json({"success": False, "message": "لا توجد أصناف في أمر التسليم"}, 400)
+                        return self._send_json({"success": False, "message": "لا توجد أصناف في فاتورة المبيعات"}, 400)
 
                     created_movements = []
                     with DB_LOCK:
@@ -1383,8 +1383,8 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         finally:
                             conn.close()
 
-                    add_audit_log(op_name, data.get('role') or 'WAREHOUSE_MANAGER', 'صرف أمر تسليم مخزن (دفعة واحدة)', f"تم صرف وتوثيق عدد ({len(created_movements)}) أصناف بموجب أمر تسليم رقم [{ref_no}] بنجاح", 'MOVEMENT')
-                    return self._send_json({"success": True, "movements": created_movements, "message": f"تم صرف وتوثيق أمر التسليم رقم [{ref_no}] بنجاح"})
+                    add_audit_log(op_name, data.get('role') or 'SALES_MANAGER', 'إصدار فاتورة مبيعات (دفعة واحدة)', f"تم صرف وتوثيق عدد ({len(created_movements)}) أصناف بموجب فاتورة مبيعات رقم [{ref_no}] بنجاح", 'MOVEMENT')
+                    return self._send_json({"success": True, "movements": created_movements, "message": f"تم صرف وتوثيق فاتورة المبيعات رقم [{ref_no}] بنجاح"})
                 except Exception as e:
                     return self._send_json({"success": False, "message": str(e)}, 500)
 
@@ -1423,8 +1423,8 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         finally:
                             conn.close()
 
-                    add_audit_log(cashier_name, 'WAREHOUSE_MANAGER', 'تسجيل أمر تسليم مخزن', f"تم تسجيل أمر تسليم مخزن رقم [{invoice_num}] بنجاح", 'MOVEMENT')
-                    return self._send_json({"success": True, "invoiceNumber": invoice_num, "message": "تم حفظ أمر التسليم بنجاح"})
+                    add_audit_log(cashier_name, 'SALES_MANAGER', 'تسجيل فاتورة مبيعات', f"تم تسجيل فاتورة مبيعات رقم [{invoice_num}] بنجاح", 'MOVEMENT')
+                    return self._send_json({"success": True, "invoiceNumber": invoice_num, "message": "تم حفظ فاتورة المبيعات بنجاح"})
                 except Exception as e:
                     return self._send_json({"success": False, "message": str(e)}, 500)
 
@@ -1592,7 +1592,7 @@ def start_local_server():
 try:
     from PySide6.QtCore import Qt, QUrl, QTimer
     from PySide6.QtGui import QKeySequence, QShortcut
-    from PySide6.QtWidgets import QMainWindow, QMessageBox, QFileDialog, QDialog
+    from PySide6.QtWidgets import QMainWindow, QMessageBox, QDialog
     from PySide6.QtPrintSupport import QPrinter, QPrintDialog
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWebEngineCore import QWebEngineSettings, QWebEngineProfile
@@ -1663,17 +1663,18 @@ try:
 
         def print_function(self):
             """
-            دالة الطباعة الأصلية الداخلية 100% (Native Internal Qt Printing)
-            تعتمد كلياً وحصرياً على محرك الطباعة الداخلي للنظام وإظهار حوار خيارات الطباعة الأصلي،
-            ولا تفتح أو تعتمد على أي برامج خارجية كـ Word أو قارئات PDF خارجية إطلاقاً.
+            دالة الطباعة الأصلية الداخلية المباشرة 100% (Direct Native Qt Printing)
+            تتعامل مباشرة وحصرياً مع الطابعة لإخراج الفواتير الورقية،
+            وممنوع منعاً باتاً فتح أي مسار على جهاز الكمبيوتر أو تصدير/حفظ نسخ على القرص الصلب الخارجي،
+            ويُكتفى بحفظ كافة بيانات الفواتير والمبيعات داخل قاعدة بيانات البرنامج نفسها فقط.
             """
             try:
                 printer = QPrinter(QPrinter.PrinterMode.HighResolution)
                 printer.setFullPage(True)
                 
-                # فتح حوار خيارات الطباعة الأصلي الداخلي (Native Print Dialog)
+                # فتح حوار الطابعات الأصلي المباشر (Native Print Dialog)
                 print_dialog = QPrintDialog(printer, self)
-                print_dialog.setWindowTitle("خيارات الطباعة الداخلية - شركة NOSSER")
+                print_dialog.setWindowTitle("طباعة فاتورة مبيعات - شركة NOSSER")
                 print_dialog.setAttribute(Qt.WA_NativeWindow, True)
                 print_dialog.setWindowModality(Qt.ApplicationModal)
                 
@@ -1681,33 +1682,13 @@ try:
                     self.web_view.page().print(printer, lambda success: None)
             except Exception as pe:
                 print("Native Print Error:", pe)
-                # في حال عدم وجود طابعة فيزيائية معرفة، حفظ المستند داخلياً كملف PDF
-                try:
-                    save_dialog = QFileDialog(self, "حفظ المستند كملف PDF داخلي", os.path.expanduser("~/Desktop/DeliveryOrder.pdf"), "PDF Files (*.pdf)")
-                    save_dialog.setAttribute(Qt.WA_NativeWindow, True)
-                    save_dialog.setWindowModality(Qt.ApplicationModal)
-                    save_dialog.setAcceptMode(QFileDialog.AcceptSave)
-                    
-                    if save_dialog.exec() == QDialog.Accepted:
-                        selected_files = save_dialog.selectedFiles()
-                        if selected_files:
-                            pdf_path = selected_files[0]
-                            self.web_view.page().printToPdf(pdf_path)
-                            msg = QMessageBox(self)
-                            msg.setAttribute(Qt.WA_NativeWindow, True)
-                            msg.setWindowModality(Qt.ApplicationModal)
-                            msg.setWindowTitle("تم الحفظ بنجاح")
-                            msg.setText(f"تم حفظ أمر التسليم كملف PDF في المسار:\\n{pdf_path}")
-                            msg.setIcon(QMessageBox.Information)
-                            msg.exec()
-                except Exception as save_err:
-                    err_msg = QMessageBox(self)
-                    err_msg.setAttribute(Qt.WA_NativeWindow, True)
-                    err_msg.setWindowModality(Qt.ApplicationModal)
-                    err_msg.setWindowTitle("تنبيه الطباعة")
-                    err_msg.setText(f"تعذر إتمام عملية الطباعة الداخلية:\\n{pe}")
-                    err_msg.setIcon(QMessageBox.Warning)
-                    err_msg.exec()
+                err_msg = QMessageBox(self)
+                err_msg.setAttribute(Qt.WA_NativeWindow, True)
+                err_msg.setWindowModality(Qt.ApplicationModal)
+                err_msg.setWindowTitle("تنبيه الطباعة المباشرة")
+                err_msg.setText(f"تعذر إتمام أمر الطباعة مع الطابعة:\\n{pe}\\n(تم حفظ بيانات الفاتورة داخل قاعدة البيانات تلقائياً دون تصدير خارجي)")
+                err_msg.setIcon(QMessageBox.Warning)
+                err_msg.exec()
 
         def closeEvent(self, event):
             """إجراء تفريغ نهائي لقاعدة البيانات وحفظ كافة التغييرات بأمان عند إغلاق النافذة"""
