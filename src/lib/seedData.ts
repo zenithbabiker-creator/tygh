@@ -126,6 +126,32 @@ export interface InitialProductItem {
   updatedAt: string;
 }
 
+export function getDefaultItemPrice(itemName: string, category?: string): number {
+  const name = itemName.trim();
+  if (name.includes('فريزر') || name.includes('ثلاجة حلويات') || name.includes('ثلاجة عرض')) return 24000;
+  if (name.includes('بروست ضغط') || name.includes('ماكينة بروست')) return 28000;
+  if (name.includes('شاورما كهرباء') || name.includes('شاورما دبل') || name.includes('راس شاورما') || name.includes('شاورما دجاج')) return 16500;
+  if (name.includes('آيس ميكر') || name.includes('ايس ميكر')) return 18500;
+  if (name.includes('شواية لحم') || name.includes('شوايه لحم') || name.includes('شواية مشكل') || name.includes('شواية فراخ')) return 13500;
+  if (name.includes('شواية فحم') || name.includes('شوايه فحم')) return 9500;
+  if (name.includes('فرن طبقة') || name.includes('فرن طابق') || name.includes('فرن مدور')) return 17500;
+  if (name.includes('ماكينة بطاطس') || name.includes('قلايه 2 عين') || name.includes('قلاية مفرد')) return 8500;
+  if (name.includes('مفرمة لحم') || name.includes('مفرمة') || name.includes('قلاب لحوم')) return 9800;
+  if (name.includes('منشار لحمه') || name.includes('منشر لحوم')) return 11000;
+  if (name.includes('ماكينه كاشير')) return 14500;
+  if (name.includes('ماكينة سمك') || name.includes('بسكيت سمك') || name.includes('كبس سمك')) return 7800;
+  if (name.includes('طباخة') || name.includes('غلاية غاز') || name.includes('غلايه غاز') || name.includes('غلاية لتر')) return 6200;
+  if (name.includes('مبرد عصير') || name.includes('مبرد غاز') || name.includes('سخان ماء')) return 8900;
+  if (name.includes('طاولة السندوتش') || name.includes('بوفيه')) return 7500;
+  if (name.includes('سخان بروست') || name.includes('سخانات بروست') || name.includes('مسخنات بروست')) return 5800;
+  if (name.includes('خلاط') || name.includes('عصارة برتقال') || name.includes('كابتشينو')) return 4200;
+  if (name.includes('مضرب') || name.includes('مضارب') || name.includes('توستر') || name.includes('وافل')) return 3800;
+  if (name.includes('كسارة ثلج') || name.includes('ميزان ساعة') || name.includes('ديسبنسر')) return 2900;
+  if (name.includes('حوض') || name.includes('حوضات')) return 3500;
+  if (name.includes('كرتونة') || name.includes('صواني') || name.includes('صحن')) return 1500;
+  return 4500;
+}
+
 /**
  * Builds the comprehensive list of 82 initial products
  */
@@ -137,15 +163,16 @@ export function generateInitialProducts(): InitialProductItem[] {
   for (const cat of NEW_SEED_CATEGORIES) {
     for (const itemName of cat.items) {
       const codeNum = 100 + seq;
+      const price = getDefaultItemPrice(itemName, cat.category);
       products.push({
         id: String(seq),
-        code: `NASSER-${codeNum}`,
+        code: `NOSSER-${codeNum}`,
         name: itemName,
         category: cat.category,
         stock: 10,
         minStock: 5,
         unit: 'وحدة',
-        price: 0,
+        price,
         description: `صنف معتمد: ${itemName} - قسم ${cat.category}`,
         updatedAt: now,
       });

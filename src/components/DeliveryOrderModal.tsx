@@ -8,7 +8,10 @@ export interface DispatchItem {
   product: Product;
   quantity: number;
   unitPrice?: number;
+  unit_price?: number;
+  price?: number;
   totalPrice?: number;
+  total_price?: number;
   notes?: string;
 }
 
@@ -33,37 +36,23 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
   const isOpen = Boolean(movement || (items && items.length > 0));
   const printableRef = useRef<HTMLDivElement>(null);
 
-  // Initial recipient parsing
-  const initialRawRecipient =
-    recipientName ||
-    recipientEntity ||
-    (movement?.reason?.startsWith('فاتورة مبيعات - المستلم/العميل:')
-      ? movement.reason.replace('فاتورة مبيعات - المستلم/العميل:', '').trim()
-      : movement?.reason?.startsWith('فاتورة مبيعات - المستلم:')
-      ? movement.reason.replace('فاتورة مبيعات - المستلم:', '').trim()
-      : movement?.reason?.startsWith('أمر تسليم مخزن - المستلم:')
-      ? movement.reason.replace('أمر تسليم مخزن - المستلم:', '').trim()
-      : movement?.reason?.startsWith('إذن صرف مخزني - المستلم:')
-      ? movement.reason.replace('إذن صرف مخزني - المستلم:', '').trim()
-      : '') ||
-    movement?.operatorName ||
-    '';
+  // Initial recipient parsing: extract clean recipient name from prop or movement reason
+  const resolveRecipient = (): string => {
+    const direct = (recipientName || recipientEntity || '').trim();
+    if (direct) return direct;
+    const parsed = movement?.reason?.match(/(?:المستلم\/العميل|المستلم|العميل):\s*([^,\n]+)/)?.[1]?.trim();
+    if (parsed) return parsed;
+    return '';
+  };
 
-  const [currentRecipient, setCurrentRecipient] = useState<string>(
-    initialRawRecipient && initialRawRecipient !== '..........................'
-      ? initialRawRecipient.trim()
-      : 'عميل نقدي / مبيعات مباشرة'
-  );
-
+  const [currentRecipient, setCurrentRecipient] = useState<string>(resolveRecipient());
   const [isEditingRecipient, setIsEditingRecipient] = useState<boolean>(false);
-  const [orderNotes, setOrderNotes] = useState<string>('مبيعات نقدية معتمدة - استلام سليم ومطابق');
+  const [orderNotes, setOrderNotes] = useState<string>('استلام سليم ومطابق للمواصفات');
   const [copyType, setCopyType] = useState<string>('نسخة أصلية معتمدة');
 
   useEffect(() => {
-    if (initialRawRecipient && initialRawRecipient !== '..........................') {
-      setCurrentRecipient(initialRawRecipient.trim());
-    }
-  }, [initialRawRecipient]);
+    setCurrentRecipient(resolveRecipient());
+  }, [recipientName, recipientEntity, movement?.reason, isOpen]);
 
   // Dual-Engine High-Fidelity Print Trigger (Direct to native printer only, zero disk file prompts)
   const handlePrint = () => {
@@ -102,33 +91,103 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
   );
 
   const displayItems: DispatchItem[] = items.length > 0
-    ? items
+    ? items.map(itm => {
+        const itemAny = itm as any;
+        const prodAny = (itm.product || {}) as any;
+
+        // Extract unit price with exhaustive fallbacks
+        const candidatePrices = [
+          itemAny.unitPrice,
+          itemAny.unit_price,
+          itemAny.price,
+          prodAny.price,
+          prodAny.unit_price,
+          prodAny.unitPrice,
+        ];
+        let foundPrice: number | undefined;
+        for (const cp of candidatePrices) {
+          if (cp !== undefined && cp !== null && cp !== '') {
+            const num = Number(cp);
+            if (!isNaN(num) && num >= 0) {
+              foundPrice = num;
+              break;
+            }
+          }
+        }
+        const uPrice = foundPrice !== undefined ? foundPrice : 0;
+        const q = Math.max(1, Number(itm.quantity) || 1);
+
+        // Automatic line total calculation (price * quantity)
+        let lineTotal = uPrice * q;
+        if (itemAny.totalPrice !== undefined && itemAny.totalPrice !== null && !isNaN(Number(itemAny.totalPrice))) {
+          lineTotal = Number(itemAny.totalPrice);
+        } else if (itemAny.total_price !== undefined && itemAny.total_price !== null && !isNaN(Number(itemAny.total_price))) {
+          lineTotal = Number(itemAny.total_price);
+        }
+
+        return {
+          ...itm,
+          quantity: q,
+          unitPrice: uPrice,
+          unit_price: uPrice,
+          price: uPrice,
+          totalPrice: lineTotal,
+          total_price: lineTotal,
+        };
+      })
     : movement
-    ? [{
-        product: {
-          id: movement.productId,
-          code: movement.productCode,
-          name: movement.productName,
-          category: 'عام',
-          stock: movement.newStock,
-          unit: 'وحدة',
-          price: movement.unitPrice || 0,
-          minStock: 5,
-          updatedAt: movement.timestamp,
-        },
-        quantity: movement.quantity,
-        unitPrice: movement.unitPrice || 0,
-        totalPrice: movement.totalPrice || ((movement.unitPrice || 0) * movement.quantity),
-      }]
+    ? (() => {
+        const mAny = movement as any;
+        const candidatePrices = [
+          mAny.unitPrice,
+          mAny.unit_price,
+          mAny.price,
+        ];
+        let foundPrice: number | undefined;
+        for (const cp of candidatePrices) {
+          if (cp !== undefined && cp !== null && cp !== '') {
+            const num = Number(cp);
+            if (!isNaN(num) && num >= 0) {
+              foundPrice = num;
+              break;
+            }
+          }
+        }
+        const uPrice = foundPrice !== undefined ? foundPrice : 0;
+        const q = Math.max(1, Number(movement.quantity) || 1);
+        const lineTotal = Number(mAny.totalPrice ?? mAny.total_price ?? (uPrice * q));
+
+        return [{
+          product: {
+            id: movement.productId,
+            code: movement.productCode,
+            name: movement.productName,
+            category: 'عام',
+            stock: movement.newStock,
+            unit: 'وحدة',
+            price: uPrice,
+            unit_price: uPrice,
+            minStock: 5,
+            updatedAt: movement.timestamp,
+          },
+          quantity: q,
+          unitPrice: uPrice,
+          unit_price: uPrice,
+          price: uPrice,
+          totalPrice: lineTotal,
+          total_price: lineTotal,
+        }];
+      })()
     : [];
 
   const totalQuantity = displayItems.reduce((acc, itm) => acc + (Number(itm.quantity) || 1), 0);
 
-  // Calculate grand total order price (shown only in the printed/final sales invoice as requested)
+  // Grand Total calculation (sum of line totals: price * quantity)
   const grandTotalAmount = displayItems.reduce((acc, itm) => {
-    const unitPrice = Number(itm.unitPrice ?? itm.product?.price ?? 0);
+    const uPrice = Number(itm.unitPrice ?? itm.product?.price ?? 0);
     const qty = Number(itm.quantity) || 1;
-    return acc + (unitPrice * qty);
+    const lineTotal = Number(itm.totalPrice ?? (uPrice * qty));
+    return acc + lineTotal;
   }, 0);
 
   const docNo = orderNumber
@@ -320,23 +379,29 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
               </thead>
               <tbody className="divide-y-2 divide-black font-black text-black bg-white">
                 {displayItems.map((item, index) => {
-                  const qty = Number(item.quantity) || 1;
-                  const unitPrice = Number(item.unitPrice ?? item.product?.price ?? 0);
-                  const lineTotal = unitPrice * qty;
+                  const qty = Math.max(1, Number(item.quantity) || 1);
+                  const unitPrice = Number(
+                    item.unitPrice ?? 
+                    (item as any)?.unit_price ?? 
+                    (item as any)?.price ?? 
+                    item.product?.price ?? 
+                    (item.product as any)?.unit_price ?? 
+                    0
+                  );
+                  const lineTotal = Number(item.totalPrice ?? (unitPrice * qty));
+                  const formattedUnitPrice = toArabicNumerals(unitPrice.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }));
+                  const formattedLineTotal = toArabicNumerals(lineTotal.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }));
 
                   return (
                     <tr key={item.product.id || index} className="border-b-2 border-black bg-white">
                       <td className="p-2.5 text-center font-mono border-l-2 border-black text-black font-black text-sm">
-                        {index + 1}
+                        {toArabicNumerals(index + 1)}
                       </td>
                       <td className="p-2.5 font-mono font-black text-black border-l-2 border-black text-xs sm:text-sm">
                         {toArabicNumerals(item.product.code)}
                       </td>
                       <td className="p-2.5 font-black text-xs sm:text-sm text-black border-l-2 border-black">
                         <div>{item.product.name}</div>
-                        {item.product.category && (
-                          <div className="text-[10px] text-slate-600 font-normal">{item.product.category}</div>
-                        )}
                       </td>
                       <td className="p-2.5 text-center font-black text-xs sm:text-sm text-black border-l-2 border-black">
                         {item.product.unit || 'وحدة'}
@@ -345,10 +410,10 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
                         {toArabicNumerals(qty)}
                       </td>
                       <td className="p-2.5 text-center font-mono font-black text-xs sm:text-sm text-black border-l-2 border-black">
-                        {unitPrice > 0 ? `${toArabicNumerals(unitPrice.toLocaleString())} ج.س` : '—'}
+                        {formattedUnitPrice} ج.س
                       </td>
                       <td className="p-2.5 text-center font-mono font-black text-xs sm:text-sm text-black border-l-2 border-black bg-slate-100">
-                        {lineTotal > 0 ? `${toArabicNumerals(lineTotal.toLocaleString())} ج.س` : '—'}
+                        {formattedLineTotal} ج.س
                       </td>
                       <td className="p-2.5 text-center text-xs text-black border-black font-bold">
                         {item.notes || orderNotes || 'سليم ومطابق'}
@@ -371,14 +436,12 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
                 <span className="text-black">إجمالي كمية القطع: </span>
                 <strong className="font-mono text-base text-black underline underline-offset-4">{toArabicNumerals(totalQuantity)} قطعة</strong>
               </div>
-              {grandTotalAmount > 0 && (
-                <div className="bg-slate-100 border-2 border-black px-4 py-1.5 rounded-lg">
-                  <span className="text-black font-black text-sm">القيمة الكلية للطلب (إجمالي الفاتورة): </span>
-                  <strong className="font-mono text-base text-black font-black underline underline-offset-4">
-                    {toArabicNumerals(grandTotalAmount.toLocaleString())} ج.س
-                  </strong>
-                </div>
-              )}
+              <div className="bg-slate-100 border-2 border-black px-4 py-1.5 rounded-lg">
+                <span className="text-black font-black text-sm">القيمة الكلية للطلب (إجمالي الفاتورة): </span>
+                <strong className="font-mono text-base text-black font-black underline underline-offset-4">
+                  {toArabicNumerals(grandTotalAmount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }))} ج.س
+                </strong>
+              </div>
             </div>
 
             <div className="text-xs font-black text-slate-800 bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-1.5">

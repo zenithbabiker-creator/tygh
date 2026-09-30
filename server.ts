@@ -4,6 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { getDefaultItemPrice } from './src/lib/seedData';
 
 const app = express();
 const PORT = 3000;
@@ -462,9 +463,23 @@ function readDB(): DBData {
       writeDB(db);
     }
 
+    // Ensure all products have positive valid prices for direct sales
+    let updatedPriceCount = 0;
+    db.products.forEach(p => {
+      const currentPrice = Number(p.price);
+      if (isNaN(currentPrice) || currentPrice <= 0) {
+        p.price = getDefaultItemPrice(p.name, p.category);
+        updatedPriceCount++;
+      }
+    });
+    if (updatedPriceCount > 0) {
+      console.log(`💰 Updated ${updatedPriceCount} products with baseline sales prices.`);
+      writeDB(db);
+    }
+
     // Ensure appName is updated
     if (db.settings && (!db.settings.appName || db.settings.appName.includes('NASSER'))) {
-      db.settings.appName = 'شركة NOSSER - نظام إدارة المخازن والمخزون';
+      db.settings.appName = 'شركة NOSSER - نظام المبيعات المباشر';
       writeDB(db);
     }
 
@@ -733,11 +748,13 @@ app.get('/api/products', (req, res) => {
   const db = readDB();
   const list = db.products || [];
   const sanitized = list.map((p, idx) => {
+    const rawPrice = Number(p.price);
+    const validPrice = !isNaN(rawPrice) && rawPrice > 0 ? rawPrice : getDefaultItemPrice(p.name, p.category);
     return {
       ...p,
       id: p.id && String(p.id).trim() && !['none', 'null', 'undefined'].includes(String(p.id).toLowerCase()) ? String(p.id) : String(idx + 1),
       code: p.code && p.code.startsWith('NOSSER-') ? p.code : `NOSSER-${p.code ? p.code.replace(/^NASSER-/, '') : p.id || idx + 101}`,
-      price: Math.max(0, Number(p.price) || 0),
+      price: validPrice,
     };
   });
   res.json({ success: true, products: sanitized, count: sanitized.length });

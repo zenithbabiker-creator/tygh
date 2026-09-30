@@ -93,6 +93,8 @@ export interface Product {
   store_id?: string;
   warehouseName?: string;
   price?: number; // سعر الوحدة (يحدد عند الإدخال/الشراء)
+  unit_price?: number;
+  unitPrice?: number;
   description?: string;
   imageUrl?: string;
   updatedAt: string;
@@ -110,7 +112,10 @@ export interface StockMovement {
   type: 'IN' | 'OUT' | 'ADJUSTMENT'; // توريد / صرف / تعديل جرد
   quantity: number;
   unitPrice?: number;
+  unit_price?: number;
+  price?: number;
   totalPrice?: number;
+  total_price?: number;
   previousStock: number;
   newStock: number;
   reason: string;
