@@ -1101,7 +1101,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <tr className="bg-slate-100 text-slate-800 font-extrabold border-b border-slate-200 text-xs">
                     <th className="p-3.5 w-32 font-mono">كود الصنف (Item Code)</th>
                     <th className="p-3.5">اسم الصنف (Item Name)</th>
-                    <th className="p-3.5 w-28">التصنيف</th>
                     <th className="p-3.5 w-28 text-center bg-emerald-50/80 text-emerald-950 font-black">السعر (ج.س)</th>
                     <th className="p-3.5 w-28 text-center bg-blue-50/70">الرصيد المتوفر</th>
                     <th className="p-3.5 w-28 text-center">حالة المخزون</th>
@@ -1160,12 +1159,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             </div>
                           </td>
 
-                          {/* Category */}
-                          <td className="p-3.5 text-slate-600 font-medium">
-                            <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md text-[11px] font-bold">
-                              {product.category || 'عام'}
-                            </span>
-                          </td>
 
                           {/* Unit Price (السعر) */}
                           <td className="p-3.5 text-center font-mono font-black text-xs sm:text-sm text-emerald-800 bg-emerald-50/40">
@@ -1297,6 +1290,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   type="text"
                   value={recipientName}
                   onChange={(e) => setRecipientName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      // Find the print button or focus it to trigger
+                      const printBtn = document.querySelector('button[title*="إصدار وطباعة"]') as HTMLButtonElement;
+                      if (printBtn) printBtn.focus();
+                    }
+                  }}
                   placeholder="أدخل اسم العميل أو الجهة المستلمة هنا..."
                   className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-none transition shadow-2xs"
                 />
@@ -1428,43 +1429,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
                         <span className="text-[11px] font-bold text-slate-600">الكمية المباعة:</span>
                         <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateCartQuantity(product.id, quantity - 1)}
-                            className="w-7 h-7 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center text-slate-700 font-bold text-xs transition cursor-pointer shadow-xs"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-
                           <input
                             type="number"
                             min="1"
-                            value={quantity || ''}
+                            value={quantity}
                             onChange={(e) => {
-                              const raw = e.target.value;
-                              if (raw === '') {
-                                handleUpdateCartQuantity(product.id, 0);
-                              } else {
-                                const parsed = parseInt(raw, 10);
-                                if (!isNaN(parsed) && parsed > 0) {
-                                  handleUpdateCartQuantity(product.id, parsed);
-                                }
+                              const val = parseInt(e.target.value, 10);
+                              if (!isNaN(val) && val > 0) {
+                                handleUpdateCartQuantity(product.id, val);
                               }
                             }}
-                            onBlur={() => {
-                              if (quantity <= 0) {
-                                handleUpdateCartQuantity(product.id, 1);
-                              }
-                            }}
-                            className="w-14 py-1 bg-white border border-slate-300 rounded-lg font-mono font-black text-center text-xs focus:border-blue-600 focus:outline-none shadow-inner"
+                            className="w-16 py-1.5 bg-white border border-slate-300 rounded-lg font-mono font-black text-center text-sm focus:border-blue-600 focus:outline-none shadow-inner"
                           />
-
                           <button
                             type="button"
-                            onClick={() => handleUpdateCartQuantity(product.id, (quantity || 0) + 1)}
-                            className="w-7 h-7 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center text-slate-700 font-bold text-xs transition cursor-pointer shadow-xs"
+                            onClick={() => handleUpdateCartQuantity(product.id, quantity + 1)}
+                            className="w-8 h-8 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center font-bold text-lg transition cursor-pointer shadow-sm"
                           >
-                            <Plus className="w-3.5 h-3.5" />
+                            +
                           </button>
                         </div>
                       </div>
@@ -1642,6 +1624,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       <DeliveryOrderModal
         items={activeDeliveryItems || []}
         orderNumber={activeDeliveryOrderNo}
+        recipientName={activeRecipientName}
         onClose={() => {
           setActiveDeliveryItems(null);
           setActiveDeliveryOrderNo('');

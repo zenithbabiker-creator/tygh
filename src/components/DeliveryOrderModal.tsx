@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { StockMovement, Product } from '../types';
 import { toArabicNumerals } from '../lib/arabicUtils';
 import { X, Printer, Receipt, Edit3, Check, FileCheck, Layers } from 'lucide-react';
@@ -16,6 +16,7 @@ export interface DispatchItem {
 }
 
 interface DeliveryOrderModalProps {
+  isOpen?: boolean;
   movement?: StockMovement | null;
   items?: DispatchItem[];
   orderNumber?: string;
@@ -26,6 +27,7 @@ interface DeliveryOrderModalProps {
 }
 
 export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
+  isOpen: isOpenProp,
   movement,
   items = [],
   orderNumber,
@@ -33,53 +35,49 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
   recipientEntity,
   onClose
 }) => {
-  const isOpen = Boolean(movement || (items && items.length > 0));
+  const isOpen = Boolean(isOpenProp || movement || (items && items.length > 0));
   const printableRef = useRef<HTMLDivElement>(null);
 
-  // Initial recipient parsing: extract clean recipient name from prop or movement reason
-  const resolveRecipient = (): string => {
-    const direct = (recipientName || recipientEntity || '').trim();
-    if (direct) return direct;
-    const parsed = movement?.reason?.match(/(?:المستلم\/العميل|المستلم|العميل):\s*([^,\n]+)/)?.[1]?.trim();
-    if (parsed) return parsed;
-    return '';
-  };
-
-  const [currentRecipient, setCurrentRecipient] = useState<string>(resolveRecipient());
-  const [isEditingRecipient, setIsEditingRecipient] = useState<boolean>(false);
+  // Direct recipient name from props
+  const currentRecipient = (recipientName || recipientEntity || '').trim();
   const [orderNotes, setOrderNotes] = useState<string>('استلام سليم ومطابق للمواصفات');
   const [copyType, setCopyType] = useState<string>('نسخة أصلية معتمدة');
 
-  useEffect(() => {
-    setCurrentRecipient(resolveRecipient());
-  }, [recipientName, recipientEntity, movement?.reason, isOpen]);
-
-  // Dual-Engine High-Fidelity Print Trigger (Direct to native printer only, zero disk file prompts)
-  const handlePrint = () => {
-    if (printableRef.current) {
-      printHtmlElement(printableRef.current, {
-        title: `فاتورة مبيعات رقم ${orderNumber || movement?.referenceNo || '1'} - شركة NOSSER`,
-      });
-    } else {
-      window.focus();
-      window.print();
+  // Guaranteed print function with DOM blur and requestAnimationFrame
+  const handlePrint = useCallback(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
     }
-  };
 
-  // Keyboard Shortcut (Ctrl + P / Cmd + P)
+    window.focus();
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        window.print();
+      }, 50);
+    });
+  }, []);
+
+  // Keyboard Shortcut (Ctrl + P / Cmd + P) with capture phase
   useEffect(() => {
     if (!isOpen) return;
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-        e.preventDefault();
-        e.stopPropagation();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isPKey = event.key.toLowerCase() === 'p' || event.code === 'KeyP';
+      const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+
+      if (isCtrlOrCmd && isPKey) {
+        event.preventDefault();
+        event.stopPropagation();
         handlePrint();
       }
     };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen]);
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
+  }, [isOpen, handlePrint]);
 
   if (!isOpen) return null;
 
@@ -252,57 +250,7 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
           </div>
         </div>
 
-        {/* Quick Edit Bar before Print (no-print) */}
-        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-700 no-print">
-          <div className="flex items-center gap-2 flex-1 min-w-[280px]">
-            <span className="text-slate-900 font-extrabold shrink-0">اسم العميل / المستلم:</span>
-            {isEditingRecipient ? (
-              <div className="flex items-center gap-1.5 flex-1">
-                <input
-                  type="text"
-                  value={currentRecipient}
-                  onChange={(e) => setCurrentRecipient(e.target.value)}
-                  placeholder="اكتب اسم العميل أو الجهة المستلمة..."
-                  className="flex-1 px-3 py-1 bg-white border-2 border-blue-600 rounded-lg text-xs font-bold text-black focus:outline-none"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  onClick={() => setIsEditingRecipient(false)}
-                  className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
-                  title="تأكيد الاسم"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-black font-black bg-white px-3 py-1 rounded-md border border-slate-300">
-                  {currentRecipient}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsEditingRecipient(true)}
-                  className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded cursor-pointer"
-                  title="تعديل اسم العميل قبل الطباعة"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-          </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-slate-900 font-extrabold shrink-0">ملاحظات الفاتورة:</span>
-            <input
-              type="text"
-              value={orderNotes}
-              onChange={(e) => setOrderNotes(e.target.value)}
-              className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs text-black font-bold focus:outline-none focus:border-blue-600 max-w-xs"
-              placeholder="ملاحظات المبيعات..."
-            />
-          </div>
-        </div>
 
         {/* PRINTABLE AREA - STRICTLY PURE BLACK TEXT ON PURE WHITE BACKGROUND */}
         <div
@@ -455,12 +403,14 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
             
             {/* 1. Recipient Signature */}
             <div className="space-y-2 flex flex-col justify-between">
-              <span className="font-black text-black block text-sm">توقيع العميل / المستلم</span>
-              <div className="text-[11px] font-black text-black space-y-1">
-                <div>الاسم: <span className="font-black text-black underline underline-offset-4">{currentRecipient || '..........................'}</span></div>
-              </div>
-              <div className="border-b-2 border-dashed border-black w-4/5 mx-auto pb-1 text-black text-[11px] pt-3">
-                ..........................................
+              <span className="font-black text-black block text-sm">توقيع العميل / المشتري</span>
+              <div className="text-[11px] font-black text-black space-y-1 mt-6">
+                <div className="border-b-2 border-black pt-4 w-full text-center min-h-[40px]">
+                   {/* Signature line above name */}
+                </div>
+                <div className="text-center font-black pt-1">
+                   {currentRecipient || '..........................'}
+                </div>
               </div>
             </div>
 
