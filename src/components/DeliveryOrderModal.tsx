@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { StockMovement, Product } from '../types';
 import { toArabicNumerals } from '../lib/arabicUtils';
-import { X, Printer, Receipt, Edit3, Check, FileCheck, Layers } from 'lucide-react';
+import { X, Printer, Receipt } from 'lucide-react';
 import { printHtmlElement } from '../utils/printDocument';
 
 export interface DispatchItem {
@@ -40,8 +40,6 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
 
   // Direct recipient name from props
   const currentRecipient = (recipientName || recipientEntity || '').trim();
-  const [orderNotes, setOrderNotes] = useState<string>('استلام سليم ومطابق للمواصفات');
-  const [copyType, setCopyType] = useState<string>('نسخة أصلية معتمدة');
 
   // Guaranteed print function with DOM blur and requestAnimationFrame
   const handlePrint = useCallback(() => {
@@ -207,28 +205,12 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
             <div>
               <h3 className="text-base font-black text-black">معاينة وطباعة فاتورة مبيعات</h3>
               <p className="text-[11px] text-slate-600 font-bold">
-                فاتورة مبيعات رسمية معتمدة تطبع بدقة عالية على ورق A4 مع احتساب الإجمالي
+                فاتورة مبيعات تطبع بدقة عالية على ورق A4 مع احتساب الإجمالي
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Copy Type Selector */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-300 text-xs">
-              <Layers className="w-3.5 h-3.5 text-slate-500 mr-1" />
-              <select
-                value={copyType}
-                onChange={(e) => setCopyType(e.target.value)}
-                className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer py-1 px-1.5"
-                title="نوع النسخة المطبوعة"
-              >
-                <option value="نسخة أصلية معتمدة">نسخة أصلية معتمدة</option>
-                <option value="نسخة العميل">نسخة العميل</option>
-                <option value="نسخة المحاسبة والمبيعات">نسخة المحاسبة والمبيعات</option>
-                <option value="نسخة الإدارة">نسخة الإدارة</option>
-              </select>
-            </div>
-
             <button
               type="button"
               onClick={handlePrint}
@@ -264,14 +246,11 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-black text-black font-['Tajawal'] tracking-tight">شركة NOSSER - أم درمان</h1>
-                <span className="text-[10px] font-black border border-black px-1.5 py-0.5 rounded text-black bg-slate-100">
-                  {copyType}
-                </span>
               </div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-black text-black font-['Tajawal']">نظام المبيعات المباشر</h2>
                 <span className="text-xs font-black px-2 py-0.5 border border-black rounded-md bg-slate-100 font-['Tajawal']">
-                  [فاتورة مبيعات رسمية]
+                  [فاتورة مبيعات]
                 </span>
               </div>
               <p className="text-xs font-black text-black font-mono flex items-center gap-1">
@@ -321,8 +300,7 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
                   <th className="p-2.5 border-l-2 border-b-2 border-black text-center w-20 text-black font-black">الوحدة</th>
                   <th className="p-2.5 border-l-2 border-b-2 border-black text-center w-24 text-black font-black bg-slate-50">الكمية</th>
                   <th className="p-2.5 border-l-2 border-b-2 border-black text-center w-28 text-black font-black">سعر الوحدة</th>
-                  <th className="p-2.5 border-l-2 border-b-2 border-black text-center w-32 text-black font-black bg-slate-100">الإجمالي (السعر × الكمية)</th>
-                  <th className="p-2.5 border-b-2 border-black text-center w-32 text-black font-black">ملاحظات</th>
+                  <th className="p-2.5 border-b-2 border-black text-center w-36 text-black font-black bg-slate-100">الإجمالي (السعر × الكمية)</th>
                 </tr>
               </thead>
               <tbody className="divide-y-2 divide-black font-black text-black bg-white">
@@ -360,11 +338,8 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
                       <td className="p-2.5 text-center font-mono font-black text-xs sm:text-sm text-black border-l-2 border-black">
                         {formattedUnitPrice} ج.س
                       </td>
-                      <td className="p-2.5 text-center font-mono font-black text-xs sm:text-sm text-black border-l-2 border-black bg-slate-100">
+                      <td className="p-2.5 text-center font-mono font-black text-xs sm:text-sm text-black bg-slate-100">
                         {formattedLineTotal} ج.س
-                      </td>
-                      <td className="p-2.5 text-center text-xs text-black border-black font-bold">
-                        {item.notes || orderNotes || 'سليم ومطابق'}
                       </td>
                     </tr>
                   );
@@ -390,11 +365,6 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({
                   {toArabicNumerals(grandTotalAmount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }))} ج.س
                 </strong>
               </div>
-            </div>
-
-            <div className="text-xs font-black text-slate-800 bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-1.5">
-              <FileCheck className="w-4 h-4 text-emerald-700" />
-              <span>✓ فاتورة مبيعات معتمدة وصادرة رسمياً من شركة NOSSER</span>
             </div>
           </div>
 

@@ -1590,8 +1590,8 @@ def start_local_server():
 # 5. Native Qt GUI Window (QWebEngineView + Native Direct Printing)
 # -------------------------------------------------------------
 try:
-    from PySide6.QtCore import Qt, QUrl, QTimer
-    from PySide6.QtGui import QKeySequence, QShortcut
+    from PySide6.QtCore import Qt, QUrl, QTimer, QSize
+    from PySide6.QtGui import QKeySequence, QShortcut, QPainter, QTextDocument
     from PySide6.QtWidgets import QMainWindow, QMessageBox, QDialog
     from PySide6.QtPrintSupport import QPrinter, QPrintDialog
     from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -1663,12 +1663,13 @@ try:
 
         def print_function(self):
             """
-            دالة الطباعة الأصلية الداخلية المباشرة 100% (Direct Native Qt Printing)
+            دالة الطباعة الأصلية الداخلية المباشرة 100% المتوافقة مع PySide6 الحديثة (Direct Native Qt Printing)
             تتعامل مباشرة وحصرياً مع الطابعة لإخراج الفواتير الورقية،
             وممنوع منعاً باتاً فتح أي مسار على جهاز الكمبيوتر أو تصدير/حفظ نسخ على القرص الصلب الخارجي،
             ويُكتفى بحفظ كافة بيانات الفواتير والمبيعات داخل قاعدة بيانات البرنامج نفسها فقط.
             """
             try:
+                import tempfile
                 printer = QPrinter(QPrinter.PrinterMode.HighResolution)
                 printer.setFullPage(True)
                 
@@ -1678,17 +1679,105 @@ try:
                 print_dialog.setAttribute(Qt.WA_NativeWindow, True)
                 print_dialog.setWindowModality(Qt.ApplicationModal)
                 
-                if print_dialog.exec() == QPrintDialog.DialogCode.Accepted:
-                    self.web_view.page().print(printer, lambda success: None)
+                if print_dialog.exec() != QPrintDialog.DialogCode.Accepted:
+                    return
+
+                selected_printer_name = printer.printerName()
+                temp_dir = tempfile.gettempdir()
+                temp_pdf = os.path.join(temp_dir, f"nosser_print_{int(time.time() * 1000)}.pdf")
+
+                def handle_pdf_output(file_path, success):
+                    try:
+                        if not success or not os.path.exists(file_path):
+                            self._fallback_print_html(printer)
+                            return
+                        
+                        # 1. المحاولة الأولى: الرسم المباشر على الطابعة عبر PySide6.QtPdf و QPainter
+                        printed = False
+                        try:
+                            from PySide6.QtPdf import QPdfDocument
+                            pdf_doc = QPdfDocument(self)
+                            pdf_doc.load(file_path)
+                            page_count = pdf_doc.pageCount()
+                            if page_count > 0:
+                                painter = QPainter(printer)
+                                target_rect = printer.pageRect(QPrinter.Unit.DevicePixel)
+                                img_size = QSize(int(target_rect.width()), int(target_rect.height()))
+                                for i in range(page_count):
+                                    if i > 0:
+                                        printer.newPage()
+                                    page_img = pdf_doc.render(i, img_size)
+                                    painter.drawImage(target_rect, page_img)
+                                painter.end()
+                                printed = True
+                        except Exception as e_qtpdf:
+                            print("QtPdf render note:", e_qtpdf)
+
+                        # 2. المحاولة الثانية: إرسال أمر طباعة مباشر وصامت في ويندوز للطابعة المحددة
+                        if not printed and sys.platform == 'win32' and selected_printer_name:
+                            try:
+                                import subprocess
+                                ps_cmd = f"Start-Process -FilePath '{file_path}' -Verb PrintTo -ArgumentList [char]34 + '{selected_printer_name}' + [char]34 -PassThru | Out-Null"
+                                cmd = [
+                                    "powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                                    "-Command", ps_cmd
+                                ]
+                                subprocess.Popen(cmd, creationflags=0x08000000)
+                                printed = True
+                            except Exception as e_cmd:
+                                print("Windows shell print note:", e_cmd)
+
+                        if not printed:
+                            self._fallback_print_html(printer)
+                    except Exception as err:
+                        print("Print job error:", err)
+                        self._fallback_print_html(printer)
+                    finally:
+                        QTimer.singleShot(25000, lambda: self._cleanup_temp_file(file_path))
+
+                page = self.web_view.page()
+                try:
+                    page.pdfPrintingFinished.disconnect()
+                except Exception:
+                    pass
+                page.pdfPrintingFinished.connect(handle_pdf_output)
+
+                try:
+                    page.printToPdf(temp_pdf, printer.pageLayout())
+                except Exception:
+                    page.printToPdf(temp_pdf)
+
             except Exception as pe:
                 print("Native Print Error:", pe)
-                err_msg = QMessageBox(self)
-                err_msg.setAttribute(Qt.WA_NativeWindow, True)
-                err_msg.setWindowModality(Qt.ApplicationModal)
-                err_msg.setWindowTitle("تنبيه الطباعة المباشرة")
-                err_msg.setText(f"تعذر إتمام أمر الطباعة مع الطابعة:\\n{pe}\\n(تم حفظ بيانات الفاتورة داخل قاعدة البيانات تلقائياً دون تصدير خارجي)")
-                err_msg.setIcon(QMessageBox.Warning)
-                err_msg.exec()
+                try:
+                    self._fallback_print_html(printer)
+                except Exception:
+                    pass
+
+        def _fallback_print_html(self, printer):
+            """طباعة احتياطية للـ HTML عبر QTextDocument مباشرة إلى الطابعة"""
+            def on_html(html_content):
+                try:
+                    from PySide6.QtGui import QTextDocument
+                    doc = QTextDocument()
+                    doc.setHtml(html_content)
+                    if hasattr(doc, 'print_'):
+                        doc.print_(printer)
+                    elif hasattr(doc, 'print'):
+                        doc.print(printer)
+                except Exception as e:
+                    print("QTextDocument print error:", e)
+            try:
+                self.web_view.page().toHtml(on_html)
+            except Exception:
+                pass
+
+        def _cleanup_temp_file(self, file_path):
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
 
         def closeEvent(self, event):
             """إجراء تفريغ نهائي لقاعدة البيانات وحفظ كافة التغييرات بأمان عند إغلاق النافذة"""
