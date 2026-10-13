@@ -1678,12 +1678,29 @@ try:
                 temp_dir = tempfile.gettempdir()
                 temp_pdf = os.path.join(temp_dir, f"nosser_print_{int(time.time() * 1000)}.pdf")
 
-                def handle_pdf_output(file_path, success):
+                is_printed_flag = [False]
+
+                def handle_pdf_output(*args, **kwargs):
+                    if is_printed_flag[0]:
+                        return
+                    file_path = temp_pdf
+                    success = True
+                    if len(args) >= 2:
+                        file_path = args[0]
+                        success = bool(args[1])
+                    elif len(args) == 1:
+                        if isinstance(args[0], bool):
+                            success = args[0]
+                        elif isinstance(args[0], str):
+                            file_path = args[0]
+
                     try:
                         if not success or not os.path.exists(file_path):
                             self._fallback_print_html(printer)
                             return
                         
+                        is_printed_flag[0] = True
+
                         # 1. المحاولة الأولى: الرسم المباشر على الطابعة عبر PySide6.QtPdf و QPainter
                         printed = False
                         try:
@@ -1733,6 +1750,12 @@ try:
                 except Exception:
                     pass
                 page.pdfPrintingFinished.connect(handle_pdf_output)
+
+                # مؤقت احتياطي لضمان إرسال الملف للطباعة حتى في حال تأخر إشارة WebEngine
+                def check_file_and_print():
+                    if not is_printed_flag[0] and os.path.exists(temp_pdf) and os.path.getsize(temp_pdf) > 200:
+                        handle_pdf_output(temp_pdf, True)
+                QTimer.singleShot(2500, check_file_and_print)
 
                 try:
                     page.printToPdf(temp_pdf, printer.pageLayout())
