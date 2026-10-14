@@ -213,6 +213,36 @@ def flush_db_on_exit():
 import atexit
 atexit.register(flush_db_on_exit)
 
+def get_db_setting(key, default_val=''):
+    try:
+        with DB_LOCK:
+            conn = get_db_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+                cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
+                row = cursor.fetchone()
+                return str(row[0]) if row and row[0] is not None else default_val
+            finally:
+                conn.close()
+    except Exception:
+        return default_val
+
+def set_db_setting(key, val):
+    try:
+        with DB_LOCK:
+            conn = get_db_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+                cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(val)))
+                commit_and_sync(conn)
+                return True
+            finally:
+                conn.close()
+    except Exception:
+        return False
+
 def init_sqlite_db():
     """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL وترقية المخطط (Schema Migration) مع معالجة ذكية للـ Lock"""
     with DB_LOCK:
@@ -231,6 +261,14 @@ def init_sqlite_db():
 
                 cursor = conn.cursor()
                 
+                # جدول إعدادات النظام وتفضيلات الطابعة
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                ''')
+
                 # جدول المنتجات بتوليد تلقائي للمعرف (Auto-Increment Primary Key)
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS products (
@@ -893,6 +931,39 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception as e:
                     return self._send_json({"success": False, "error": str(e)}, 500)
 
+            # 5.1 API GET Printers (Local Printer Discovery)
+            if parsed_path == '/api/printers':
+                try:
+                    printers_list = []
+                    preferred = get_db_setting('preferred_printer', '')
+                    virtual_keywords = ['pdf', 'xps', 'onenote', 'fax', 'writer', 'document writer']
+                    
+                    try:
+                        from PySide6.QtPrintSupport import QPrinterInfo
+                        avail = QPrinterInfo.availablePrinters()
+                        default_p = QPrinterInfo.defaultPrinter()
+                        default_name = default_p.printerName() if (default_p and not default_p.isNull()) else ''
+                        
+                        for p in avail:
+                            p_name = p.printerName()
+                            is_virt = any(vn in p_name.lower() for vn in virtual_keywords)
+                            printers_list.append({
+                                "name": p_name,
+                                "isDefault": (p_name == default_name),
+                                "isPhysical": not is_virt,
+                                "isPreferred": (p_name == preferred)
+                            })
+                    except Exception:
+                        pass
+
+                    return self._send_json({
+                        "success": True,
+                        "printers": printers_list,
+                        "preferredPrinter": preferred
+                    })
+                except Exception as e:
+                    return self._send_json({"success": False, "error": str(e)}, 500)
+
             if parsed_path.startswith('/api/'):
                 return self._send_json({"success": False, "message": "المسار غير موجود"}, 404)
 
@@ -920,6 +991,18 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         try:
             parsed_path = self.path.split('?')[0].split('#')[0]
+
+            # 0. Set Preferred Printer
+            if parsed_path == '/api/printers/preferred':
+                try:
+                    data = self._read_json_body()
+                    p_name = (data.get('printerName') or '').strip()
+                    if not p_name:
+                        return self._send_json({"success": False, "message": "اسم الطابعة مطلوب"}, 400)
+                    set_db_setting('preferred_printer', p_name)
+                    return self._send_json({"success": True, "message": f"تم اعتماد الطابعة [{p_name}] للفواتير بنجاح", "preferredPrinter": p_name})
+                except Exception as e:
+                    return self._send_json({"success": False, "message": str(e)}, 500)
 
             # 1. User Authentication (Login)
             if parsed_path == '/api/auth/login':
@@ -1662,29 +1745,55 @@ try:
                 from PySide6.QtPrintSupport import QPrinterInfo
                 virtual_keywords = ['pdf', 'xps', 'onenote', 'fax', 'writer', 'document writer']
                 available = QPrinterInfo.availablePrinters()
-                
-                # 1. فحص الطابعة الافتراضية للنظام أولاً
+
+                # 1. إذا كان المستخدم قد حدد طابعة مفضلة مسبقاً في إعدادات التطبيق
+                preferred = get_db_setting('preferred_printer', '')
+                if preferred:
+                    for p in available:
+                        if p.printerName().strip() == preferred.strip():
+                            print(f"[Printer Detection] Using User Preferred Printer: {p.printerName()}")
+                            return p, True
+
+                # 2. فحص الطابعة الافتراضية للنظام أولاً (إذا لم تكن PDF/XPS)
                 default_p = QPrinterInfo.defaultPrinter()
                 if default_p and not default_p.isNull():
                     name_lower = default_p.printerName().lower()
                     if not any(v in name_lower for v in virtual_keywords):
                         print(f"[Printer Detection] Using Default Physical Printer: {default_p.printerName()}")
-                        return default_p
+                        return default_p, True
 
-                # 2. إذا كانت الطابعة الافتراضية طابعة وهمية (مثل PDF)، البحث عن أول طابعة فيزيائية حقيقية
+                # 3. استخدام استعلام PowerShell لفحص منافذ وأسماء الطابعات الحقيقية (استبعاد منافذ PORTPROMPT: و FILE:)
+                if sys.platform == 'win32':
+                    try:
+                        import subprocess
+                        ps_script = 'Get-Printer | Where-Object { $_.PortName -notlike "*PORTPROMPT*" -and $_.PortName -notlike "*FILE*" -and $_.DriverName -notlike "*PDF*" -and $_.DriverName -notlike "*XPS*" -and $_.Name -notlike "*PDF*" -and $_.Name -notlike "*XPS*" -and $_.Name -notlike "*OneNote*" -and $_.Name -notlike "*Fax*" } | Select-Object -ExpandProperty Name'
+                        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script]
+                        out = subprocess.check_output(cmd, creationflags=0x08000000, text=True, timeout=4)
+                        real_names = [line.strip() for line in out.strip().splitlines() if line.strip()]
+                        for rn in real_names:
+                            for p in available:
+                                if p.printerName().strip().lower() == rn.lower():
+                                    print(f"[Printer Detection] PowerShell verified physical printer: {p.printerName()}")
+                                    set_db_setting('preferred_printer', p.printerName())
+                                    return p, True
+                    except Exception as e_ps:
+                        print("PowerShell printer scan note:", e_ps)
+
+                # 4. البحث بالاسم عبر QPrinterInfo
                 for p in available:
                     name_lower = p.printerName().lower()
                     if not any(v in name_lower for v in virtual_keywords):
-                        print(f"[Printer Detection] Found Physical Printer: {p.printerName()}")
-                        return p
+                        print(f"[Printer Detection] Found Physical Printer by name: {p.printerName()}")
+                        set_db_setting('preferred_printer', p.printerName())
+                        return p, True
 
-                # 3. إذا لم تكن هناك طابعات فيزيائية أخرى، نعود للـ default
-                if default_p and not default_p.isNull():
-                    return default_p
-                return available[0] if available else None
+                # 5. في حال لم توجد أي طابعة فيزيائية على الإطلاق
+                print("[Printer Detection] WARNING: No physical printer found on system!")
+                return None, False
+
             except Exception as e:
                 print("Printer detection error:", e)
-                return None
+                return None, False
 
         def print_function(self):
             """
@@ -1695,14 +1804,30 @@ try:
             """
             try:
                 import tempfile
-                from PySide6.QtWidgets import QApplication
+                from PySide6.QtWidgets import QApplication, QMessageBox
+                from PySide6.QtPrintSupport import QPrinterInfo, QPrintDialog
 
                 # فحص الضغط على زر Shift لفتح حوار الطابعات يدوياً إذا رغب المستخدم
                 modifiers = QApplication.keyboardModifiers()
                 show_dialog = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
 
                 # البحث عن الطابعة الفيزيائية وتخطي PDF الوهمية
-                target_pinfo = self.get_physical_printer_info()
+                target_pinfo, is_physical = self.get_physical_printer_info()
+
+                # في حال لم تكن هناك طابعة فيزيائية حقيقية، نبه المستخدم بدلاً من فتح نافذة حفظ PDF
+                if not is_physical or not target_pinfo or target_pinfo.isNull():
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle("تنبيه طابعة الفواتير")
+                    msg.setIcon(QMessageBox.Warning)
+                    msg.setText("تنبيه: لم يتم العثور على طابعة فواتير فيزيائية متصلة بالنظام!\n\nطابعة النظام الافتراضية مضبوطة على (Microsoft Print to PDF) والتي تطلب حفظ الملفات.\n\nيرجى التأكد من توصيل طابعتك بجهاز الكمبيوتر أو اختيارها يدوياً.")
+                    msg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+                    msg.setButtonText(QMessageBox.Ok, "اختيار طابعة يدوياً")
+                    msg.setButtonText(QMessageBox.Cancel, "إلغاء")
+                    if msg.exec() == QMessageBox.Ok:
+                        show_dialog = True
+                        target_pinfo = QPrinterInfo.defaultPrinter()
+                    else:
+                        return
 
                 if target_pinfo and not target_pinfo.isNull():
                     printer = QPrinter(target_pinfo, QPrinter.PrinterMode.HighResolution)
@@ -1720,9 +1845,11 @@ try:
                     print_dialog.setWindowModality(Qt.ApplicationModal)
                     if print_dialog.exec() != QPrintDialog.DialogCode.Accepted:
                         return
+                    # حفظ اختيار المستخدم اليدوي كطابعة معتمدة دائماً
+                    set_db_setting('preferred_printer', printer.printerName())
 
                 selected_printer_name = printer.printerName()
-                print(f"[Silent Native Print] Sending invoice directly to: {selected_printer_name}")
+                print(f"[Direct Silent Print] Printing invoice to: {selected_printer_name}")
 
                 temp_dir = tempfile.gettempdir()
                 temp_pdf = os.path.join(temp_dir, f"nosser_silent_{int(time.time() * 1000)}.pdf")

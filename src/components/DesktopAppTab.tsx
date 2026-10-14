@@ -1,10 +1,69 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { generatePySideScript } from '../lib/pysideScriptGenerator';
-import { Download, Copy, Check, Monitor, Terminal, FileCode, HardDrive } from 'lucide-react';
+import { Download, Copy, Check, Monitor, Terminal, FileCode, Printer, AlertTriangle, RefreshCw, CheckCircle2 } from 'lucide-react';
+
+interface PrinterItem {
+  name: string;
+  isDefault: boolean;
+  isPhysical: boolean;
+  isPreferred: boolean;
+}
 
 export const DesktopAppTab: React.FC = () => {
   const [copied, setCopied] = useState(false);
+  const [printers, setPrinters] = useState<PrinterItem[]>([]);
+  const [selectedPrinter, setSelectedPrinter] = useState<string>('');
+  const [preferredPrinter, setPreferredPrinter] = useState<string>('');
+  const [loadingPrinters, setLoadingPrinters] = useState<boolean>(false);
+  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const pythonScript = generatePySideScript();
+
+  const fetchPrinters = async () => {
+    try {
+      setLoadingPrinters(true);
+      const res = await fetch('/api/printers');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.printers)) {
+          setPrinters(data.printers);
+          const pref = data.preferredPrinter || '';
+          setPreferredPrinter(pref);
+          if (pref) {
+            setSelectedPrinter(pref);
+          } else {
+            const firstPhys = data.printers.find((p: PrinterItem) => p.isPhysical);
+            if (firstPhys) setSelectedPrinter(firstPhys.name);
+          }
+        }
+      }
+    } catch (e) {
+      // Ignored in purely web dev preview
+    } finally {
+      setLoadingPrinters(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPrinters();
+  }, []);
+
+  const handleSavePreferredPrinter = async () => {
+    if (!selectedPrinter) return;
+    try {
+      const res = await fetch('/api/printers/preferred', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printerName: selectedPrinter })
+      });
+      if (res.ok) {
+        setPreferredPrinter(selectedPrinter);
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(pythonScript);
@@ -24,6 +83,8 @@ export const DesktopAppTab: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const physicalPrinters = printers.filter(p => p.isPhysical);
+
   return (
     <div className="space-y-6">
       
@@ -34,7 +95,7 @@ export const DesktopAppTab: React.FC = () => {
             <Monitor className="w-6 h-6 text-blue-400" />
             <h3 className="text-xl font-extrabold font-['Tajawal'] flex items-center gap-2">
               <span>تطبيق سطح المكتب المباشر لنظام الويندوز (Windows .exe)</span>
-              <span className="text-xs font-mono font-bold bg-blue-500/30 text-blue-300 border border-blue-400/40 px-2 py-0.5 rounded-full">v3.0.1</span>
+              <span className="text-xs font-mono font-bold bg-blue-500/30 text-blue-300 border border-blue-400/40 px-2 py-0.5 rounded-full">v3.0.2</span>
             </h3>
           </div>
           <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
@@ -59,6 +120,88 @@ export const DesktopAppTab: React.FC = () => {
             <span>تحميل سكريبت (nasser_app.py)</span>
           </button>
         </div>
+      </div>
+
+      {/* Printer Configuration & Anti-SavePrintOutputAs Box */}
+      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+              <Printer className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-slate-900">
+                إدارة طابعة الفواتير المعتمدة (حل مشكلة Save Print Output As)
+              </h4>
+              <p className="text-xs text-slate-500">
+                يقوم التطبيق بالطباعة الصامتة المباشرة إلى الطابعة الفيزيائية المختارة هنا وتخطي طابعات PDF الوهمية تلقائياً
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={fetchPrinters}
+            disabled={loadingPrinters}
+            className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg flex items-center gap-1.5 transition font-bold"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingPrinters ? 'animate-spin' : ''}`} />
+            <span>تحديث الطابعات المتصلة</span>
+          </button>
+        </div>
+
+        {printers.length > 0 ? (
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <label className="text-xs font-bold text-slate-700 shrink-0">
+                اختر طابعتك الفيزيائية الحقيقية:
+              </label>
+              <select
+                value={selectedPrinter}
+                onChange={(e) => setSelectedPrinter(e.target.value)}
+                className="bg-slate-50 border border-slate-300 text-slate-900 text-xs rounded-xl p-2.5 font-bold focus:ring-2 focus:ring-blue-500 flex-1 w-full sm:w-auto"
+              >
+                {printers.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name} {p.isPhysical ? '✓ (طابعة حقيقية)' : '⚠️ (طابعة وهمية/PDF)'} {p.isDefault ? '[افتراضية ويندوز]' : ''}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={handleSavePreferredPrinter}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shrink-0 shadow-sm"
+              >
+                <Check className="w-4 h-4" />
+                <span>تثبيت كطابعة دائمة للفواتير</span>
+              </button>
+            </div>
+
+            {saveSuccess && (
+              <div className="p-2.5 bg-emerald-50 text-emerald-800 text-xs rounded-lg flex items-center gap-2 border border-emerald-200 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>تم اعتماد الطابعة [{preferredPrinter}] بنجاح! سيتم إرسال كافة الفواتير إليها مباشرة بصمت.</span>
+              </div>
+            )}
+
+            {physicalPrinters.length === 0 && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  <strong>تنبيه ويندوز: جميع الطابعات الحالية هي طابعات وهمية (مثل Microsoft Print to PDF)!</strong>
+                  <p className="text-[11px] text-amber-800">
+                    سبب ظهور نافذة "Save Print Output As" هو عدم وجود تعريف لطابعة فيزيائية حقيقية موصولة بالجهاز. يرجى توصيل طابعتك (كابل USB أو عبر الشبكة) وتشغيلها، ثم الضغط على "تحديث الطابعات المتصلة" لتحديدها.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-center justify-between">
+            <span className="leading-relaxed">
+              💡 عند تشغيل السكريبت على ويندوز، سيتم فحص طابعات النظام تلقائياً وتثبيت أول طابعة حقيقية لتوجيه أمر الطباعة إليها دون فتح نوافذ حفظ.
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Instructions Steps */}
