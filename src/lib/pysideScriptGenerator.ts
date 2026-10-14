@@ -1593,7 +1593,7 @@ try:
     from PySide6.QtCore import Qt, QUrl, QTimer, QSize
     from PySide6.QtGui import QKeySequence, QShortcut, QPainter, QTextDocument
     from PySide6.QtWidgets import QMainWindow, QMessageBox, QDialog
-    from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+    from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWebEngineCore import QWebEngineSettings, QWebEngineProfile
 
@@ -1661,31 +1661,79 @@ try:
                 self.retry_count += 1
                 QTimer.singleShot(1000, lambda: self.web_view.setUrl(QUrl(self.app_url)))
 
+        def get_physical_printer_info(self):
+            """
+            العثور التلقائي على الطابعة الفيزيائية الحقيقية المتصلة بالنظام
+            وتخطي الطابعات الوهمية (مثل Microsoft Print to PDF أو XPS أو OneNote) لمنع ظهور نافذة حفظ الملف (Save Print Output As)
+            """
+            try:
+                from PySide6.QtPrintSupport import QPrinterInfo
+                virtual_keywords = ['pdf', 'xps', 'onenote', 'fax', 'writer', 'document writer']
+                available = QPrinterInfo.availablePrinters()
+                
+                # 1. فحص الطابعة الافتراضية للنظام أولاً
+                default_p = QPrinterInfo.defaultPrinter()
+                if default_p and not default_p.isNull():
+                    name_lower = default_p.printerName().lower()
+                    if not any(v in name_lower for v in virtual_keywords):
+                        print(f"[Printer Detection] Using Default Physical Printer: {default_p.printerName()}")
+                        return default_p
+
+                # 2. إذا كانت الطابعة الافتراضية طابعة وهمية (مثل PDF)، البحث عن أول طابعة فيزيائية حقيقية
+                for p in available:
+                    name_lower = p.printerName().lower()
+                    if not any(v in name_lower for v in virtual_keywords):
+                        print(f"[Printer Detection] Found Physical Printer: {p.printerName()}")
+                        return p
+
+                # 3. إذا لم تكن هناك طابعات فيزيائية أخرى، نعود للـ default
+                if default_p and not default_p.isNull():
+                    return default_p
+                return available[0] if available else None
+            except Exception as e:
+                print("Printer detection error:", e)
+                return None
+
         def print_function(self):
             """
-            دالة الطباعة الأصلية الداخلية المباشرة 100% المتوافقة مع PySide6 الحديثة (Direct Native Qt Printing)
-            تتعامل مباشرة وحصرياً مع الطابعة لإخراج الفواتير الورقية،
-            وممنوع منعاً باتاً فتح أي مسار على جهاز الكمبيوتر أو تصدير/حفظ نسخ على القرص الصلب الخارجي،
-            ويُكتفى بحفظ كافة بيانات الفواتير والمبيعات داخل قاعدة بيانات البرنامج نفسها فقط.
+            الطباعة المباشرة الصامتة (Direct Silent Print):
+            - إرسال الفاتورة فوراً إلى الطابعة الحقيقية المتصلة بالنظام دون إظهار نافذة حفظ الملف (Save Print Output As)
+            - تخطي Microsoft Print to PDF وتحديد وضع الطباعة المباشرة QPrinter.OutputFormat.NativeFormat
+            - إمكانية فتح حوار الطابعات يدوياً فقط في حال ضغط المستخدم على زر Shift أثناء الطباعة
             """
             try:
                 import tempfile
-                printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                from PySide6.QtWidgets import QApplication
+
+                # فحص الضغط على زر Shift لفتح حوار الطابعات يدوياً إذا رغب المستخدم
+                modifiers = QApplication.keyboardModifiers()
+                show_dialog = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+
+                # البحث عن الطابعة الفيزيائية وتخطي PDF الوهمية
+                target_pinfo = self.get_physical_printer_info()
+
+                if target_pinfo and not target_pinfo.isNull():
+                    printer = QPrinter(target_pinfo, QPrinter.PrinterMode.HighResolution)
+                else:
+                    printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+
+                # تعيين نمط الطباعة المباشر للأجهزة الفيزيائية
+                printer.setOutputFormat(QPrinter.OutputFormat.NativeFormat)
                 printer.setFullPage(True)
-                
-                # فتح حوار الطابعات الأصلي المباشر (Native Print Dialog)
-                print_dialog = QPrintDialog(printer, self)
-                print_dialog.setWindowTitle("طباعة فاتورة مبيعات - شركة NOSSER")
-                print_dialog.setAttribute(Qt.WA_NativeWindow, True)
-                print_dialog.setWindowModality(Qt.ApplicationModal)
-                
-                if print_dialog.exec() != QPrintDialog.DialogCode.Accepted:
-                    return
+
+                if show_dialog:
+                    print_dialog = QPrintDialog(printer, self)
+                    print_dialog.setWindowTitle("تحديد طابعة الفواتير - شركة NOSSER")
+                    print_dialog.setAttribute(Qt.WA_NativeWindow, True)
+                    print_dialog.setWindowModality(Qt.ApplicationModal)
+                    if print_dialog.exec() != QPrintDialog.DialogCode.Accepted:
+                        return
 
                 selected_printer_name = printer.printerName()
-                temp_dir = tempfile.gettempdir()
-                temp_pdf = os.path.join(temp_dir, f"nosser_print_{int(time.time() * 1000)}.pdf")
+                print(f"[Silent Native Print] Sending invoice directly to: {selected_printer_name}")
 
+                temp_dir = tempfile.gettempdir()
+                temp_pdf = os.path.join(temp_dir, f"nosser_silent_{int(time.time() * 1000)}.pdf")
                 is_printed_flag = [False]
 
                 def handle_pdf_output(*args, **kwargs):
@@ -1706,10 +1754,10 @@ try:
                         if not success or not os.path.exists(file_path):
                             self._fallback_print_html(printer)
                             return
-                        
+
                         is_printed_flag[0] = True
 
-                        # 1. المحاولة الأولى: الرسم المباشر على الطابعة عبر PySide6.QtPdf و QPainter
+                        # 1. المحاولة الأولى: الرسم المباشر الصامت على الطابعة عبر PySide6.QtPdf و QPainter
                         printed = False
                         try:
                             from PySide6.QtPdf import QPdfDocument
@@ -1727,6 +1775,7 @@ try:
                                     painter.drawImage(target_rect, page_img)
                                 painter.end()
                                 printed = True
+                                print(f"[Silent Native Print] Successfully delivered to printer: {selected_printer_name}")
                         except Exception as e_qtpdf:
                             print("QtPdf render note:", e_qtpdf)
 
@@ -1741,6 +1790,7 @@ try:
                                 ]
                                 subprocess.Popen(cmd, creationflags=0x08000000)
                                 printed = True
+                                print(f"[Silent Native Print] Dispatched to Windows Spooler: {selected_printer_name}")
                             except Exception as e_cmd:
                                 print("Windows shell print note:", e_cmd)
 
